@@ -1,22 +1,10 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-
 from gym.spaces import Box, Discrete
 import numpy as np
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 from pettingzoo.utils import wrappers
 
-import ray.rllib.agents.pg as PG
-
-from ray.tune.registry import register_env
-# import the pettingzoo environment
-# import rllib pettingzoo interface
-from ray.rllib.env import PettingZooEnv
-
 import logging
-
 
 
 
@@ -280,33 +268,3 @@ def env():
     env = wrappers.AssertOutOfBoundsWrapper(env)
     env = wrappers.OrderEnforcingWrapper(env)
     return env
-
-
-
-from ray.tune.registry import register_env
-# import the pettingzoo environment
-from ray.rllib.env import PettingZooEnv
-from ray import tune
-# define how to make the environment. This way takes an optional environment config, num_floors
-env_creator = lambda config: env()
-# register that way to make the environment under an rllib name
-register_env('AutonomousDefenceEnv', lambda config: PettingZooEnv(env_creator(config)))
-# now you can use `prison` as an environment
-# you can pass arguments to the environment creator with the env_config option in the config
-
-
-stop = {
-    "training_iteration": 150,
-    "timesteps_total": 100000,
-    "episode_reward_mean": 1000,
-}
-
-config = {
-    "env": "AutonomousDefenceEnv",
-}
-
-
-results = tune.run("PG", config=config, stop=stop, verbose=1)
-
-
-
