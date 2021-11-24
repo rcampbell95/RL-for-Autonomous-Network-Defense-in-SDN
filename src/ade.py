@@ -1,32 +1,8 @@
-from gym.spaces import Box, Discrete
+from gym.spaces import Box, Discrete, Tuple
 import numpy as np
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 from pettingzoo.utils import wrappers
-
-import logging
-
-
-
-ROCK = 0
-PAPER = 1
-SCISSORS = 2
-NONE = 3
-MOVES = ["ROCK", "PAPER", "SCISSORS", "None"]
-NUM_ITERS = 100
-REWARD_MAP = {
-    (ROCK, ROCK): (0, 0),
-    (ROCK, PAPER): (-1, 1),
-    (ROCK, SCISSORS): (1, -1),
-    (PAPER, ROCK): (1, -1),
-    (PAPER, PAPER): (0, 0),
-    (PAPER, SCISSORS): (-1, 1),
-    (SCISSORS, ROCK): (-1, 1),
-    (SCISSORS, PAPER): (1, -1),
-    (SCISSORS, SCISSORS): (0, 0),
-}
-
-
 
 
 class AutonomousDefenceEnv(AECEnv):
@@ -52,7 +28,9 @@ class AutonomousDefenceEnv(AECEnv):
         self.num_nodes = 5
         self.agent_name_mapping = dict(zip(self.possible_agents, list(range(len(self.possible_agents)))))
         self.observation_spaces =  {agent: Box(-1, 2, (self.num_nodes, self.num_nodes)) for agent in self.possible_agents}
-        self.action_spaces = {agent: Discrete(4) for agent in self.possible_agents}
+        self.action_spaces = {agent: Tuple([Discrete(self.num_nodes), Discrete(3)]) for agent in self.possible_agents}
+        self.NUM_ITERS = 100
+
 
     def observation_space(self, agent):
         return self.observation_spaces[agent]
@@ -66,10 +44,14 @@ class AutonomousDefenceEnv(AECEnv):
         up a graphical window, or open up some other display that a human can see and understand.
         '''
         if len(self.agents) == 2:
-            string = ("Current state: Agent1: {} , Agent2: {}".format(MOVES[self.state[self.agents[0]]], MOVES[self.state[self.agents[1]]]))
+            attacker_state = self.observations[self.agents[0]].diagonal()
+            defender_state = self.observations[self.agents[1]].diagonal()
+            global_state = self.global_state.diagonal()
+            game_state = (f"Current state: Attacker: {attacker_state} , Defender: {defender_state}, Global state: {global_state}")
         else:
-            string = "Game over"
-        print(string)
+            game_state = "Game over"
+        print(f"Currently selected agent: {self.agent_selection}")
+        print(game_state)
 
     def observe(self, agent):
         '''
@@ -109,11 +91,13 @@ class AutonomousDefenceEnv(AECEnv):
         self._cumulative_rewards = {agent: 0 for agent in self.agents}
         self.dones = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
+
         # TODO -- reset state and observation accounting for initiall ycompromised nodes
-        self.state = {agent: self.reset_state(agent) for agent in self.agents}
+        self.global_state = np.zeros((self.num_nodes, self.num_nodes))
         self.observations = {agent: self.reset_observation(agent) for agent in self.agents}
         # Set initially compromised nodes
         self.num_moves = 0
+        self.action_completed = False
         '''
         Our agent_selector utility allows easy cyclic stepping through the agents list.
         '''
@@ -140,6 +124,9 @@ class AutonomousDefenceEnv(AECEnv):
 
         agent = self.agent_selection
 
+        self.render()
+
+
         # the agent which stepped last had its _cumulative_rewards accounted for
         # (because it was returned by last()), so the _cumulative_rewards for this
         # agent should start again at 0
@@ -147,26 +134,28 @@ class AutonomousDefenceEnv(AECEnv):
 
         # stores action of current agent
 
+        self.action_completed = False
         # TODO -- update state in a reasonable way
         # State is global: i.e. it is the global view of the environment
-        self.state[self.agent_selection] = self.state_update(agent, self.state[agent], action)
-        
+        self.observations[self.agent_selection] = self.update_observation(agent, self.observations[agent], action)
+    
+
         if self.metadata["emulate_network"]:
             self.send_message_to_controller(action)
         # collect reward if it is the last agent to act
         if self._agent_selector.is_last():
             # rewards for all agents are placed in the .rewards dictionary
             # TODO -- Add reward function
-            self.rewards[self.agents[0]], self.rewards[self.agents[1]] = (self.attacker_reward(), self.defender_reward())
+            self.rewards[self.agents[0]], self.rewards[self.agents[1]] = (self.attacker_reward(self.observations["attacker"]), self.defender_reward(self.observations["defender"]))
             #REWARD_MAP[(self.state[self.agents[0]], self.state[self.agents[1]])]
 
             self.num_moves += 1
             # The dones dictionary must be updated for all players.
-            self.dones = {agent: self.num_moves >= NUM_ITERS for agent in self.agents}
+            self.dones = {agent: self.num_moves >= self.NUM_ITERS for agent in self.agents}
 
             # observe the current state
-            for i in self.agents:
-                self.observations[i] = self.state[self.agents[self.agent_name_mapping[i]]]
+            #for i in self.agents:
+            #    self.observations[i] = self.state[self.agents[self.agent_name_mapping[i]]]
         else:
             # necessary so that observe() returns a reasonable observation at all times.
             ## self.state[self.agents[1 - self.agent_name_mapping[agent]]] = NONE
@@ -179,74 +168,144 @@ class AutonomousDefenceEnv(AECEnv):
         self._accumulate_rewards()
 
 
-    def reset_state(self, agent):
-        # Reset state per agent
-        if agent == "attacker":
-            state = np.zeros((self.num_nodes, self.num_nodes))
-            state[0][0] = 2 
-            state[0][0] = 2 
-            state[0, 1:] = 1 
-            state[1:, 0] = 1
-        elif agent == "defender":
-            state = np.ones((self.num_nodes, self.num_nodes))
-            np.fill_diagonal(state, 0)
-            
-            state[self.num_nodes - 1][self.num_nodes - 1] = -1
+    def _update_global_obs(self, state):
+        node_states = self.global_state.diagonal()
+        self.global_state = np.logical_or(self.global_state, state).astype("int32")
+        self.global_state[np.diag_indices(self.num_nodes)] = node_states
+        self.global_state[np.diag_indices(self.num_nodes)] += state[np.diag_indices(self.num_nodes)].astype("int32")
 
-        return state
 
+    def _validate_attacker_action(self, action, state):
+        #explore_topo = (action == 0)
+        scan_vulns = (action == 1) and (state == 0)
+        attack_vulns = (action == 2) and (state == 1)
+        
+        return scan_vulns or attack_vulns
+
+
+    def _validate_defender_action(self, action, state):
+        check_status = (action == 0)
+        isolate_node = (action == 1) and (state == 2)
+        move_flag = (action == 2) and (state == 0)
+
+        return check_status or isolate_node or move_flag
+
+
+    def _filter_candidate_neighbors(self, obs):
+        neighbor_set = set()
+        #explored_or_compromised = obs[np.where(obs == filter_state)[0]]
+        # A node may be visited but not have any neighbors?
+        obs_cpy = obs.copy()
+        compromised_nodes = np.where(obs_cpy.diagonal() == 2)[0]
+        np.fill_diagonal(obs_cpy, 0)
+        neighbors = np.where(obs[compromised_nodes] == 1)[1]
+
+        for link in neighbors:
+            neighbor_set.add(link)
+
+        # return index of neighbors
+        return neighbor_set
+
+    def _defender_step(self, obs, action):
+        target_node = action[0]
+        target_action = action[1]
+        # hardcode base score for now
+        base_score = 0.5
+
+        if target_action == 0:
+            success = np.random.random()
+
+            true_state = self.global_state[target_node][target_node]
+            if true_state == 2:
+                obs[target_node][target_node] = 2 if success < base_score else obs[target_node][target_node]
+
+        elif target_action == 1:
+            obs[target_node][:target_node] = 0
+            obs[target_node][target_node + 1:] = 0
+
+            obs[:, target_node] = obs[target_node]
+
+            self.global_state[target_node] = obs[target_node]
+            self.global_state[:, target_node] = obs[target_node]
+        elif target_action == 2:
+            pass         
+
+        return obs
 
     def reset_observation(self, agent):
-        # Reset observation per agent
+        # Reset state per agent
         if agent == "attacker":
-            observation = np.zeros((self.num_nodes, self.num_nodes))
-            observation[0][0] = 2 
-            observation[0, 1:] = 1 
-            observation[1:, 0] = 1
+            obs = np.zeros((self.num_nodes, self.num_nodes))
+            obs[0][0] = 2 
+            obs[0, 1:] = 1 
+            obs[1:, 0] = 1
+
         elif agent == "defender":
-            observation = np.ones((self.num_nodes, self.num_nodes))
-            np.fill_diagonal(observation, 0)
-            observation[self.num_nodes - 1][self.num_nodes - 1] = -1
+            obs = np.ones((self.num_nodes, self.num_nodes))
+            np.fill_diagonal(obs, 0)
+            
+            obs[self.num_nodes - 1][self.num_nodes - 1] = -1
 
-        return observation
+        self._update_global_obs(obs)
 
-    def attacker_reward(self):
-        return np.random.randint(-1, 3)
+        return obs
 
-    def defender_reward(self):
-        return np.random.randint(-1, 3)
+    def attacker_reward(self, obs):
+        return obs.diagonal().mean()
 
-    def state_update(self, agent, state, action):
+    def defender_reward(self, obs):
+        return -1 * self.attacker_reward(obs)
+
+    def update_observation(self, agent, obs, action):
+        target_node = action[0]
+        target_action = action[1]
+
         if agent == "attacker":
             # choose a random node from list of neighbors
-            neighbors = state.diagonal()
-            is_compromised = neighbors == 2
-            indices = np.arange(neighbors.size)
+            candidate_neighbors = self._filter_candidate_neighbors(obs)
+            #neighbors = obs.diagonal()
+            #is_compromised = neighbors == 2
+            #indices = np.arange(neighbors.size)
+            valid_action = self._validate_attacker_action(target_action, obs[target_node][target_node])
+            action_possible = (target_node in candidate_neighbors) and valid_action
 
-            target_node = np.random.choice(indices[is_compromised])
+            # Explore the topology
+            #for neighbor in neighbor_set:
+            #    # if edge exists betwen target node and neighbor
+            #    if self.global_state[target_node][neighbor] == 1:
+            #        action_possible = True
+            #        break
+            #
+            #    else:
+            #        # Is this check done for all nodes or only compromised nodes?
+            #        # remove edge from adjacency matrix
+            #        obs[target_node][neighbor] = 0
 
-            for neighbor in state[target_node]:
-                pass
-                # if edge exists betwen target node and neighbor
-                ## if self.state["defender"]:
-                # then action is possible
-                #    action_possible = True
-                #    break
-                #else:
-                # remove edge from adjacency matrix
-            # if action is possible
+            if action_possible:
                 # get exploitability score
+                exploitability = 0.50
                 # generate random number
+                action_score = np.random.random()
                 # if exploitability/ >= random number
+                if action_score > exploitability:
                     # apply action to target node
-
+                    self.action_completed = True
+                    obs[target_node][target_node] = target_action
+                    # update global state
+                    self.global_state[target_node][target_node] = target_action
 
             #state = np.zeros(shape=(self.num_nodes, self.num_nodes), dtype=np.int32)
         elif agent == "defender":
-            pass
             #state = np.zeros(shape=(self.num_nodes, self.num_nodes), dtype=np.int32)
 
-        return state
+            action_possible = self._validate_defender_action(target_action, obs[target_node][target_node])
+            
+            if action_possible:
+                obs = self._defender_step(obs, action)
+        return obs
+
+
+
 
     def send_message_to_controller(self, action):
         # Map action to SDN action for controller
@@ -265,6 +324,6 @@ def env():
     '''
     env = AutonomousDefenceEnv()
     env = wrappers.CaptureStdoutWrapper(env)
-    env = wrappers.AssertOutOfBoundsWrapper(env)
+    #env = wrappers.AssertOutOfBoundsWrapper(env)
     env = wrappers.OrderEnforcingWrapper(env)
     return env
