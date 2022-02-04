@@ -5,7 +5,7 @@ import itertools
 
 
 if __name__ == "__main__":
-    NUM_TRIALS = 20
+    NUM_TRIALS = 1
     EXPERIMENT_NAME = os.getenv(f"RL_SDN_EXPERIMENT_NAME").strip()
 
     config_path = os.getenv(f"RL_SDN_EXPERIMENT_CONFIG").strip()
@@ -24,4 +24,4 @@ if __name__ == "__main__":
         trial_name = "_".join([f"{key}={str(value)}" for key, value in params.items()])
         os.environ[f"RL_SDN_EXPERIMENT_DIRECTORY"] = f"./ray_results/{EXPERIMENT_NAME}/{trial_name}"
         for i in range(NUM_TRIALS):
-            subprocess.run(["python", "tune.py"])
+            subprocess.run(["python", "./src/rl_autonomous_defence/tune.py"])

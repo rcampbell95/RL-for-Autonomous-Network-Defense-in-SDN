@@ -347,8 +347,8 @@ class AutonomousDefenceEnv(AECEnv):
 
         self._set_neighbors(attacker_obs, compromised_node_position, defender_obs[compromised_node_position])
 
-        for obs in [defender_obs, attacker_obs]:
-            self._update_global_obs(obs)
+        self.global_state["networkGraph"] = defender_obs.copy()
+        self.global_state["networkGraph"][compromised_node_position][compromised_node_position] = 2
 
         return {"defender": defender_obs, "attacker": attacker_obs}
 

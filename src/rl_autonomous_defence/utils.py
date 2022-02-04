@@ -51,7 +51,7 @@ def topology_builder(topo_name):
 
 
 def build_clique(num_nodes, start_position):
-    obs = np.ones((num_nodes, num_nodes))
+    obs = np.ones((num_nodes, num_nodes), dtype=np.int32)
     np.fill_diagonal(obs, 0)
     
     obs[start_position][start_position] = -1
@@ -60,13 +60,13 @@ def build_clique(num_nodes, start_position):
 
 
 def build_grid(num_nodes, start_position):
-    obs = np.zeros((num_nodes, num_nodes))
-
-    neighbors = set()
+    obs = np.zeros((num_nodes, num_nodes), dtype=np.int32)
 
     assert (num_nodes % 2) == 0
     
     for i, col in enumerate(obs):
+        neighbors = set()
+        
         neighbors.add((i + 1) % num_nodes)
         neighbors.add((i - 1) % num_nodes)
         neighbors.add(num_nodes - i - 1)
@@ -80,7 +80,7 @@ def build_grid(num_nodes, start_position):
 
 
 def build_linear(num_nodes, start_position):
-    obs = np.zeros((num_nodes, num_nodes))
+    obs = np.zeros((num_nodes, num_nodes), dtype=np.int32)
     
     for i, col in enumerate(obs):
         col[(i + 1) % num_nodes] = 1
