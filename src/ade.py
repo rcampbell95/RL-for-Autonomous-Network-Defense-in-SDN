@@ -105,7 +105,7 @@ class AutonomousDefenceEnv(AECEnv):
         self.global_state = {}
         self.global_state["networkGraph"] = np.zeros((self.num_nodes, self.num_nodes))
         self.global_state["vulnMetrics"] = self._set_vuln_metrics(self.num_nodes)
-        self.observations = {agent: self.reset_observation(agent) for agent in self.agents}
+        self.observations = self.reset_observations()
 
 
         # Set initially compromised nodes
@@ -335,25 +335,22 @@ class AutonomousDefenceEnv(AECEnv):
         return obs
 
 
-    def reset_observation(self, agent):
+    def reset_observations(self):
+        topology = os.getenv("RL_SDN_TOPOLOGY", "clique").strip()
+        topo_builder = utils.topology_builder(topology)
+        defender_obs = topo_builder(self.num_nodes, self.start_positions["defender"])
         # Reset state per agent
-        if agent == "attacker":
-            obs = np.zeros((self.num_nodes, self.num_nodes))
-            compromised_node_position = self.start_positions[agent]
-            obs[compromised_node_position][compromised_node_position] = 2 
 
-            obs = self._set_neighbors(obs, compromised_node_position, np.array([1] * self.num_nodes))
- 
-        elif agent == "defender":
-            #obs = np.ones((self.num_nodes, self.num_nodes))
-            #np.fill_diagonal(obs, 0)
-            
-            topo_builder = utils.topology_builder("clique")
-            obs = topo_builder(self.num_nodes, self.start_positions[agent])
+        compromised_node_position = self.start_positions["attacker"]
+        attacker_obs = np.zeros((self.num_nodes, self.num_nodes))
+        attacker_obs[compromised_node_position][compromised_node_position] = 2
 
-        self._update_global_obs(obs)
+        self._set_neighbors(attacker_obs, compromised_node_position, defender_obs[compromised_node_position])
 
-        return obs
+        for obs in [defender_obs, attacker_obs]:
+            self._update_global_obs(obs)
+
+        return {"defender": defender_obs, "attacker": attacker_obs}
 
 
     def reward_nice(self):
