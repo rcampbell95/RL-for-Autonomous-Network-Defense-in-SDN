@@ -18,7 +18,8 @@ config = {
     "num_workers": 0,
     "num_envs_per_worker": 1,
     "num_cpus_for_driver": 1,
-    "timesteps_per_iteration": 4000,
+    #"min_train_timesteps_per_reporting": 5000,
+    "timesteps_per_iteration": 5000,
     "framework": "tf",
         # Evaluate once per training iteration.
     #"evaluation_interval": None,

@@ -304,15 +304,7 @@ class AutonomousDefenceEnv(AECEnv):
         return check_status or isolate_node or move_flag
 
 
-    def _set_neighbors(self, obs, target_node, value):
-        state = obs[target_node][target_node]
-        obs[target_node] = value
 
-        obs[:, target_node] = obs[target_node]
-
-        obs[target_node][target_node] = state
-        
-        return obs
 
 
     def _check_win_conditions(self, agent):
@@ -370,7 +362,7 @@ class AutonomousDefenceEnv(AECEnv):
 
         elif target_action == 1:
 
-            obs = self._set_neighbors(obs, target_node, np.array([0] * self.num_nodes))
+            obs = utils.set_neighbors(obs, target_node, np.array([0] * self.num_nodes))
 
             self.global_state["networkGraph"][target_node] = obs[target_node]
             self.global_state["networkGraph"][:, target_node] = obs[target_node]
@@ -436,7 +428,7 @@ class AutonomousDefenceEnv(AECEnv):
         compromised_node_position = self.start_positions["attacker"]
         attacker_obs = np.zeros((self.num_nodes, self.num_nodes))
 
-        self._set_neighbors(attacker_obs, compromised_node_position, defender_obs[compromised_node_position])
+        utils.set_neighbors(attacker_obs, compromised_node_position, defender_obs[compromised_node_position])
 
         attacker_obs[compromised_node_position][compromised_node_position] = 2
 

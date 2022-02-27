@@ -41,6 +41,17 @@ def filter_candidate_neighbors(obs, global_obs):
     return neighbor_set
 
 
+def set_neighbors(obs, target_node, value):
+    state = obs[target_node][target_node]
+    obs[target_node] = value
+
+    obs[:, target_node] = obs[target_node]
+
+    obs[target_node][target_node] = state
+    
+    return obs
+
+
 def topology_builder(topo_name):
     topology_selector = {
         "clique": build_clique,
@@ -90,4 +101,3 @@ def build_linear(num_nodes, start_position):
     obs[start_position][start_position] = -1
 
     return obs
-
