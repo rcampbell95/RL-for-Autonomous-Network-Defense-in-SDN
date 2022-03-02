@@ -1,6 +1,7 @@
-from custom_metrics import CustomMetricsCallback
+from callbacks import SelfPlayCallback
 from ray.rllib.policy.policy import PolicySpec
 import os
+from ray.rllib.examples.policy.random_policy import RandomPolicy
 from ray.rllib.models import ModelCatalog
 
 from utils import select_policy, string_to_bool
@@ -9,9 +10,23 @@ from AutoregressiveActionsModel import BinaryAutoregressiveDistribution, Autoreg
 
 #config["partial_obs"] = {"lstm": tune.grid_search([True, False])}
 
+
+if string_to_bool(os.getenv("RL_SDN_RANDOMOPPONENT", "False").strip()):
+    attacker_policy = PolicySpec(policy_class=RandomPolicy)
+else:
+    attacker_policy = PolicySpec(config={
+                        "agent_id": 0,
+                        "model": {
+                            "use_lstm": string_to_bool(os.getenv("RL_SDN_ATTACKERLSTM", False)),
+                            "vf_share_layers": False
+                            },
+                            "framework": "tf"
+                        }
+                    )
+
 config = {
     "env": "AutonomousDefenceEnv",
-    "callbacks": CustomMetricsCallback,
+    "callbacks": SelfPlayCallback,
     "log_level": "DEBUG",
     "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),
     "rollout_fragment_length": 200,
@@ -54,15 +69,9 @@ config = {
     "multiagent": {
             "policies_to_train": ["attacker", "defender"],
             "policies": {
-                "attacker": PolicySpec(config={
-                    "agent_id": 0,
-                    "model": {
-                        "use_lstm": string_to_bool(os.getenv("RL_SDN_ATTACKERLSTM", False)),
-                        "vf_share_layers": False
-                    },
-                    "framework": "tf",
-                }),
-                 "defender": PolicySpec(config={
+                "attacker": attacker_policy,
+                "defender_snapshot": PolicySpec(policy_class=RandomPolicy),
+                "defender": PolicySpec(config={
                     "agent_id": 1,
                     "model": {
                         "use_lstm":  string_to_bool(os.getenv("RL_SDN_DEFENDERLSTM", False))

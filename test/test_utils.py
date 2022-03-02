@@ -34,7 +34,7 @@ def test_set_neighbors():
     target_node = 0
     value = 0
 
-    actual =  utils.set_neighbors(obs, target_node, value)
+    actual = utils.set_neighbors(np.array(obs), target_node, value)
 
     assert np.array_equal(np.array(expected), np.array(actual))
 
