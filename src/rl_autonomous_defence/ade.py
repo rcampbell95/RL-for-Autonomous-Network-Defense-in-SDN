@@ -30,7 +30,8 @@ class AutonomousDefenceEnv(AECEnv):
 
         These attributes should not be changed after initialization.
         '''
-        self.autoreg = utils.string_to_bool(os.getenv("RL_SDN_AUTOREG", "False").strip())
+        self.action_out = os.getenv("RL_SDN_ACTIONSPACE", "multi").strip()
+        self.multi_action = True if self.action_out == "autoreg" or self.action_out == "multi" else False
         self.possible_agents = ["attacker", "defender"]
         self.num_nodes = int(os.getenv("RL_SDN_NETWORKSIZE", "8").strip())
         self.agent_name_mapping = dict(zip(self.possible_agents, list(range(len(self.possible_agents)))))
@@ -40,18 +41,29 @@ class AutonomousDefenceEnv(AECEnv):
         self.screen = None
         self.isopen = True
 
-        if self.autoreg:
+        if self.action_out == "multi" or self.action_out == "autoreg":
             self.action_spaces = {agent: Tuple([Discrete(self.num_nodes), Discrete(3)]) for agent in self.possible_agents}
-        else:
+        elif self.action_out == "single":
             self.action_spaces = {agent: Discrete(self.num_nodes * 3) for agent in self.possible_agents}
 
 
     def observation_space(self, agent):
-        return self.observation_spaces[agent]
+        if "attacker" in agent:
+            return self.observation_spaces["attacker"]
+        elif "defender" in agent:
+            return self.observation_spaces["defender"]
+        else:
+            return self.observation_spaces["attacker"]
+
 
     
     def action_space(self, agent):
-        return self.action_spaces[agent]
+        if "attacker" in agent:
+            return self.action_spaces["attacker"]
+        elif "defender" in agent:
+            return self.action_spaces["defender"]
+        else:
+            return self.action_spaces["attacker"]
 
 
     def render(self, mode="rgb_array"):
@@ -179,6 +191,7 @@ class AutonomousDefenceEnv(AECEnv):
         self.global_state["vulnMetrics"] = self._set_vuln_metrics(self.num_nodes)
         self.observations = self.reset_observations()
         self.episode_costs = []
+        self.valid_actions = {agent: 0 for agent in self.agents}
 
         # Set initially compromised nodes
         self.num_moves = 0
@@ -304,9 +317,6 @@ class AutonomousDefenceEnv(AECEnv):
         return check_status or isolate_node or move_flag
 
 
-
-
-
     def _check_win_conditions(self, agent):
         if agent == "attacker":
             flag_node_index = np.where(self.observations["defender"] == -1)[0]
@@ -333,7 +343,7 @@ class AutonomousDefenceEnv(AECEnv):
         return False
 
     def _process_action(self, action):
-        if self.autoreg:
+        if self.multi_action:
             target_node = action[0]
             target_action = action[1]
         else:
@@ -376,7 +386,7 @@ class AutonomousDefenceEnv(AECEnv):
                 threshold = base_score / (10 * np.log2(self.num_nodes))
                 if success < threshold:
                     obs[target_node][target_node] = 2
-                    # self.episode_costs.append()
+
             else:
                 # migrate critical node
                 critical_node = np.where(obs == -1)[0]
@@ -444,7 +454,8 @@ class AutonomousDefenceEnv(AECEnv):
             "gabirondo": self.reward_gabirondo,
             "reward-costs-penalty": self.reward_costs_penalty,
             "reward-costs-clipped": self.reward_costs_clipped,
-            "reward-impact-penalty": self.reward_impact_penalty
+            "reward-impact-penalty": self.reward_impact_penalty,
+            "reward-binary": self.reward_binary
         }
 
         return reward_funcs[reward_specifier]
@@ -452,23 +463,46 @@ class AutonomousDefenceEnv(AECEnv):
 
     def reward_gabirondo(self, total_impact, total_cost):
         moves_made = self.NUM_ITERS - self.num_moves
-        return max(0, moves_made - total_impact - total_cost)
+
+        attacker_reward = 5 * total_impact
+        defender_reward = max(0, moves_made - 5 * total_impact - total_cost)
+        return {"attacker": attacker_reward, "defender": defender_reward}
+
 
 
     def reward_costs_penalty(self, total_impact, total_cost):
-        return self.mean_impact_score * self.num_nodes - total_impact - 0.1 * total_cost
+        defender_reward = self.mean_impact_score * self.num_nodes - total_impact - 0.1 * total_cost
+
+        return {"attacker": total_impact, "defender": defender_reward}
+
 
 
     def reward_costs_clipped(self, total_impact, total_cost):
-        return max(0, self.mean_impact_score * self.num_nodes - total_impact - 0.1 * total_cost)
+        defender_reward = max(0, self.mean_impact_score * self.num_nodes - total_impact - 0.1 * total_cost)
+
+        return {"attacker": total_impact, "defender": defender_reward}
+
 
     
     def reward_impact_penalty(self, total_impact, total_cost):
-        return self.mean_impact_score * self.num_nodes - total_impact - 0 * total_cost
+        defender_reward = self.mean_impact_score * self.num_nodes - total_impact - 0 * total_cost
+        return {"attacker": total_impact, "defender": defender_reward}
+
+
+    def reward_binary(self, total_impact, total_cost):
+        reward = {"attacker": 0, "defender": 0}
+
+        if all(self.dones.values()) and self.winner != "draw":
+            reward[self.winner] = 1
+            reward[self.agents[1 - self.agent_name_mapping[self.winner]]] = 0
+
+        return reward
 
 
     def reward(self):
-        reward = {"attacker": 0, "defender": 0}
+        reward = {"attacker": self.valid_actions["attacker"], "defender": self.valid_actions["defender"]}
+
+        self.valid_actions = {agent: 0 for agent in self.agents}
 
         exploited_nodes = np.where(self.global_state["networkGraph"] == 2)[0]
         impact_scores = [self.global_state["vulnMetrics"]["impactScore"][node] for node in exploited_nodes] 
@@ -476,28 +510,14 @@ class AutonomousDefenceEnv(AECEnv):
         total_cost = sum(self.episode_costs)
         defender_reward_func = self.reward_selector(os.getenv("RL_SDN_REWARD", "reward-costs-clipped").strip())
 
-        attack_reward = total_impact
-        def_reward = defender_reward_func(total_impact, total_cost)
+        rewards = defender_reward_func(total_impact, total_cost)
 
-        winner_rewards = {"attacker": attack_reward, "defender": def_reward}
+        winner_rewards = {"attacker": rewards["attacker"], "defender": rewards["defender"]}
 
         if all(self.dones.values()) and self.winner != "draw":
             reward[self.winner] = winner_rewards[self.winner]
             reward[self.agents[1 - self.agent_name_mapping[self.winner]]] = -1 * reward[self.winner]
 
-        return reward
-
-
-    def reward_agents(self, agent, done):
-        agent_won_episode = done and self.winner == agent
-        reward = {}
-
-        if agent_won_episode:
-            reward[agent] = 1
-            reward[self.agents[1 - self.agent_name_mapping[agent]]] = 0
-        elif not agent_won_episode:
-            reward[agent] = 0
-            reward[self.agents[1 - self.agent_name_mapping[agent]]] = 0
         return reward
 
     def update_observation(self, obs, agent, action):
@@ -527,6 +547,8 @@ class AutonomousDefenceEnv(AECEnv):
 
             if action_possible:
                 obs = self._attacker_step(obs, action)
+            else:
+                self.valid_actions["attacker"] += -1
             #state = np.zeros(shape=(self.num_nodes, self.num_nodes), dtype=np.int32)
         elif agent == "defender":
             #state = np.zeros(shape=(self.num_nodes, self.num_nodes), dtype=np.int32)
@@ -535,6 +557,9 @@ class AutonomousDefenceEnv(AECEnv):
             
             if action_possible:
                 obs = self._defender_step(obs, action)
+            else:
+                self.valid_actions["defender"] += -1
+
         return obs
 
 
