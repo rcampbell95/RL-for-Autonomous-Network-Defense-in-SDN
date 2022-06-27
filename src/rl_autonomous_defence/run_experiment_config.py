@@ -5,8 +5,7 @@ import itertools
 
 
 if __name__ == "__main__":
-    NUM_TRIALS = 20
-
+    NUM_TRIALS = 2
     EXPERIMENT_NAME = os.getenv(f"RL_SDN_EXPERIMENT_NAME").strip()
 
     config_path = os.getenv(f"RL_SDN_EXPERIMENT_CONFIG").strip()
@@ -16,13 +15,16 @@ if __name__ == "__main__":
     param_names = list(config.keys())
 
     for params_values in param_grid:
-        params = {}
-        for i, param in enumerate(params_values):
-            params[param_names[i]] = param
-            os.environ[f"RL_SDN_{param_names[i].upper()}"] = str(param)
-            assert os.getenv(f"RL_SDN_{param_names[i].upper()}") == str(param)
-
-        trial_name = "_".join([f"{key}={str(value)}" for key, value in params.items()])
-        os.environ["RL_SDN_EXPERIMENT_DIRECTORY"] = f"./ray_results/{EXPERIMENT_NAME}/{trial_name}"
         for i in range(NUM_TRIALS):
+            params = {}
+            for i, param in enumerate(params_values):
+                params[param_names[i]] = param
+                os.environ[f"RL_SDN_{param_names[i].upper()}"] = str(param)
+                assert os.getenv(f"RL_SDN_{param_names[i].upper()}") == str(param)
+
+            trial_name = "_".join([f"{key}={str(value)}" for key, value in params.items()])
+            os.environ["RL_SDN_EXPERIMENT_DIRECTORY"] = f"./ray_results/{EXPERIMENT_NAME}/{trial_name}"
+
             subprocess.run(["python", "./src/rl_autonomous_defence/tune.py"])
+
+            

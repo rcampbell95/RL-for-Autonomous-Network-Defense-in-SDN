@@ -1,4 +1,4 @@
-import ray.rllib.agents.pg as ppo
+import ray.rllib.agents.ppo as ppo
 #import ray.rllib.agents. as PG
 
 from ray.tune.registry import register_env
@@ -12,10 +12,12 @@ from ray import tune
 import ade
 import policy_config
 import os
+from CheckpointWrapper import CheckpointWrapperPPO
+
 
 
 if __name__ == "__main__":
-    ray.init(num_cpus=3)
+    ray.init(log_to_driver=False, num_cpus=4)
 
     register_env('AutonomousDefenceEnv', lambda x: PettingZooEnv(ade.env()))
 
@@ -28,11 +30,11 @@ if __name__ == "__main__":
     #algo = 
     #trainer = get_trainer_class(algo)()
 
-    config = ppo.DEFAULT_CONFIG
-    config.update(policy_config.config)
+    #config = ppo.DEFAULT_CONFIG
+    #config.update(policy_config.config)
 
-    results = tune.run(os.getenv("RL_SDN_TRAINER", "PPO").strip(),
-                        config=config, 
+    results = tune.run(CheckpointWrapperPPO,
+                        config=policy_config.config, 
                         stop=stop, 
                         verbose=1,
                         checkpoint_freq=1,

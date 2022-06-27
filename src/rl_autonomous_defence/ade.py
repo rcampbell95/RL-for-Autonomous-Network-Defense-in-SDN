@@ -1,6 +1,9 @@
 from gym.spaces import Box, Discrete, Tuple
+import gym
 import numpy as np
+
 from pettingzoo import AECEnv
+import pettingzoo
 from pettingzoo.utils import agent_selector
 from pettingzoo.utils import wrappers
 import os
@@ -35,7 +38,11 @@ class AutonomousDefenceEnv(AECEnv):
         self.possible_agents = ["attacker", "defender"]
         self.num_nodes = int(os.getenv("RL_SDN_NETWORKSIZE", "8").strip())
         self.agent_name_mapping = dict(zip(self.possible_agents, list(range(len(self.possible_agents)))))
-        self.observation_spaces =  {agent: Box(-1, 2, (self.num_nodes, self.num_nodes)) for agent in self.possible_agents}
+        self.observation_spaces = {agent: gym.spaces.Dict({
+                                                            "observation": Box(low=0, high=3, shape=(self.num_nodes, self.num_nodes), dtype=np.float32),
+                                                            "action_mask": Box(low=0, high=1, shape=(self.num_nodes + 3,))})  
+                                   for agent in self.possible_agents}
+                                                             #{agent: MultiDiscrete([[4] * self.num_nodes] * self.num_nodes) for agent in self.possible_agents}  
         self.NUM_ITERS = int(os.getenv("RL_SDN_HORIZON", "200").strip())
         self.defender_action_costs = {0: 1, 1: 6, 2:7}
         self.screen = None
@@ -81,7 +88,7 @@ class AutonomousDefenceEnv(AECEnv):
         surf.fill((255, 255, 255))
 
         node_colors = {
-            -1: np.array([0, 255, 0], dtype=int),
+            3: np.array([0, 255, 0], dtype=int),
             0: np.array([255, 255, 255], dtype=int),
             1: np.array([255, 255, 0], dtype=int),
             2: np.array([255, 0, 0], dtype=int),
@@ -113,17 +120,17 @@ class AutonomousDefenceEnv(AECEnv):
             gfxdraw.aacircle(
                 surf, x1, y1, 21, (128, 128, 128)
             )
-            if def_state[i] == -1 and state[i] == 1:
+            if def_state[i] == 3 and state[i] == 1:
                 gfxdraw.filled_circle(
                     surf, x1, y1, 20, (200, 255, 0)
                 )
-            elif def_state[i] == -1 and state[i] == 2:
+            elif def_state[i] == 3 and state[i] == 2:
                 gfxdraw.filled_circle(
                     surf, x1, y1, 20, (255, 255, 255)
                 )
-            elif def_state[i] == -1 and state[i] == 0:
+            elif def_state[i] == 3 and state[i] == 0:
                 gfxdraw.filled_circle(
-                    surf, x1, y1, 20, node_colors[-1]
+                    surf, x1, y1, 20, node_colors[3]
                 )
             else:
                 gfxdraw.filled_circle(
@@ -150,7 +157,54 @@ class AutonomousDefenceEnv(AECEnv):
         at any time after reset() is called.
         '''
         # observation of one agent is the previous state of the other
-        return np.array(self.observations[agent])
+        #assert self.observations[agent].shape == (self.num_nodes, self.num_nodes)
+        #return self.observations[agent].astype(np.int8)
+        agent_observation = self.observations[agent]
+        agent_target_node_mask = np.zeros(self.num_nodes)
+        agent_target_action_mask = np.zeros(3)
+
+        #self.observation_spaces[agent]["original_space"] =  self.observation_spaces[agent]["observation"]
+
+        if agent == "attacker":
+            compromised_nodes = np.where(agent_observation.diagonal() == 2)[0]
+            neighbors = np.where(agent_observation[compromised_nodes] == 1)[1]
+            neighbor_set = set()
+            for neighbor in neighbors:
+                neighbor_set.add(neighbor)
+
+            for i, node_state in enumerate(agent_observation.diagonal()):
+                if node_state == 2:
+                    agent_target_node_mask[i] = 1
+                    agent_target_action_mask[0] = 1
+                    #agent_action_mask[observation][0] = 1
+                elif node_state < 2:
+                    agent_target_action_mask[node_state + 1] = 1
+                if i in neighbor_set:
+                    agent_target_node_mask[i] = 1
+                    #agent_action_mask[observation][agent_observation[observation] + 1] = 1
+        elif agent == "defender":
+            critical_node = np.where(agent_observation.diagonal() == 3)[0]
+            assert critical_node.shape == (1,)
+            agent_target_node_mask[:] = 1
+            agent_target_node_mask[critical_node] = 0
+            for node_state in agent_observation.diagonal():
+                if node_state == 0:
+                    agent_target_action_mask[0] = 1
+                    agent_target_action_mask[2] = 1
+                    #agent_action_mask[observation][0] = 1
+                    #agent_action_mask[observation][2] = 1
+                elif node_state == 2:
+                    agent_target_action_mask[1] = 1
+                    #agent_action_mask[observation][1] = 1
+
+        else:
+            raise ValueError("Agent not found in observe")
+
+        agent_action_mask = np.concatenate([agent_target_node_mask, agent_target_action_mask])
+
+        assert not np.array_equal(agent_action_mask, np.zeros((11,)))
+
+        return {"observation": agent_observation.astype(np.float32), "action_mask": agent_action_mask.astype(np.int8)}
 
 
     def close(self):
@@ -187,7 +241,7 @@ class AutonomousDefenceEnv(AECEnv):
         start_positions = random.sample([i for i in range(self.num_nodes)], 2)
         self.start_positions = {"attacker": start_positions[0], "defender": start_positions[1]}
         self.global_state = {}
-        self.global_state["networkGraph"] = np.zeros((self.num_nodes, self.num_nodes))
+        self.global_state["networkGraph"] = np.zeros((self.num_nodes, self.num_nodes), dtype=np.int64)
         self.global_state["vulnMetrics"] = self._set_vuln_metrics(self.num_nodes)
         self.observations = self.reset_observations()
         self.episode_costs = []
@@ -254,16 +308,8 @@ class AutonomousDefenceEnv(AECEnv):
 
         #for agent_i, done in zip(self.agents, self.dones):
         self.rewards = self.reward()
-
-            # observe the current state
-            #for i in self.agents:
-            #    self.observations[i] = self.state[self.agents[self.agent_name_mapping[i]]]
-        #else:
-            # necessary so that observe() returns a reasonable observation at all times.
-            ## self.state[self.agents[1 - self.agent_name_mapping[agent]]] = NONE
-            # no rewards are allocated until both players give an action
-        #    pass
-            #self._clear_rewards()
+        
+        #self._clear_rewards()
 
         # selects the next agent.
         self.agent_selection = self._agent_selector.next()
@@ -275,8 +321,8 @@ class AutonomousDefenceEnv(AECEnv):
 
         self.mean_impact_score = float(os.getenv("RL_SDN_MIS", 4.311829))
         self.mean_exploitability_score = float(os.getenv("RL_SDN_MES", 2.592744))
-        self.std_impact_score = float(os.getenv("RL_SDN_STDIS", 1.539709))
-        self.std_exploitability_score = float(os.getenv("RL_SDN_STDES", 0.954755))
+        self.std_impact_score = 0.01 #float(os.getenv("RL_SDN_STDIS", 1.539709))
+        self.std_exploitability_score = 0.01 #float(os.getenv("RL_SDN_STDES", 0.954755))
 
         for _ in range(num_nodes):
             # Baseline impact: mean = 4.311829, std = 1.539709
@@ -285,7 +331,10 @@ class AutonomousDefenceEnv(AECEnv):
             impact_score = np.random.normal(self.mean_impact_score, self.std_impact_score)
             exploitability_score = np.random.normal(self.mean_exploitability_score, self.std_exploitability_score)
 
-            base_score = min(round(1.08 * impact_score + exploitability_score), 10)
+            if impact_score == 0:
+                base_score = 0
+            else:
+                base_score = min(round(impact_score + exploitability_score), 10)
 
             metrics["impactScore"].append(impact_score)
             metrics["exploitabilityScore"].append(exploitability_score)
@@ -296,7 +345,7 @@ class AutonomousDefenceEnv(AECEnv):
 
     def _update_global_obs(self, state):
         node_states = self.global_state["networkGraph"].diagonal()
-        self.global_state["networkGraph"] = np.logical_or(self.global_state["networkGraph"], state).astype("int32")
+        self.global_state["networkGraph"] = np.logical_or(self.global_state["networkGraph"], state).astype("int64")
         self.global_state["networkGraph"][np.diag_indices(self.num_nodes)] = node_states
         self.global_state["networkGraph"][np.diag_indices(self.num_nodes)] += state[np.diag_indices(self.num_nodes)].astype("int32")
 
@@ -310,7 +359,7 @@ class AutonomousDefenceEnv(AECEnv):
 
 
     def _validate_defender_action(self, action, state):
-        check_status = (action == 0) and utils.string_to_bool(os.getenv("RL_SDN_CHECKSTATUS", "True").strip())
+        check_status = (action == 0) and (state == 0) and utils.string_to_bool(os.getenv("RL_SDN_CHECKSTATUS", "True").strip())
         isolate_node = (action == 1) and (state == 2) and utils.string_to_bool(os.getenv("RL_SDN_ISOLATENODE", "True").strip())
         move_flag = (action == 2) and (state == 0) and utils.string_to_bool(os.getenv("RL_SDN_MOVEFLAG", "True").strip())
 
@@ -319,15 +368,15 @@ class AutonomousDefenceEnv(AECEnv):
 
     def _check_win_conditions(self, agent):
         if agent == "attacker":
-            flag_node_index = np.where(self.observations["defender"] == -1)[0]
+            flag_node_index = np.where(self.observations["defender"] == 3)[0]
             flag_node_compromised = self.global_state["networkGraph"].diagonal()[flag_node_index] == 2
             if flag_node_compromised:
                 self.winner = agent
                 return True
         elif agent == "defender":
-            candidate_neighbors = utils.filter_candidate_neighbors(self.observations["attacker"], self.global_state["networkGraph"])
-            attacker_no_valid_moves = len(candidate_neighbors) == 0
-            if attacker_no_valid_moves:
+            #candidate_neighbors = utils.filter_candidate_neighbors(self.observations["attacker"], self.global_state["networkGraph"])
+            #attacker_no_valid_moves = len(candidate_neighbors) == 0
+            if utils.attacker_is_isolated(self.global_state["networkGraph"]): #attacker_no_valid_moves:
                 self.winner = agent
                 return True
 
@@ -372,7 +421,7 @@ class AutonomousDefenceEnv(AECEnv):
 
         elif target_action == 1:
 
-            obs = utils.set_neighbors(obs, target_node, np.array([0] * self.num_nodes))
+            obs = utils.set_neighbors(obs, target_node, np.array([0] * self.num_nodes, dtype=np.int64))
 
             self.global_state["networkGraph"][target_node] = obs[target_node]
             self.global_state["networkGraph"][:, target_node] = obs[target_node]
@@ -386,20 +435,22 @@ class AutonomousDefenceEnv(AECEnv):
                 threshold = base_score / (10 * np.log2(self.num_nodes))
                 if success < threshold:
                     obs[target_node][target_node] = 2
-
-            else:
+                    self.episode_costs.append(self.defender_action_costs[0])
+            
+            defender_state = obs[target_node][target_node]
+            if defender_state != 2:
+            #else:
                 # migrate critical node
-                critical_node = np.where(obs == -1)[0]
+                critical_node = np.where(obs == 3)[0]
                 critical_node = critical_node.item()
 
                 assert critical_node < self.num_nodes
                 try:
                     obs[critical_node][critical_node] = 0
-                    #self.global_state["networkGraph"][critical_node][critical_node] = 0
                 except:
                     raise AssertionError(f"{critical_node}, {obs.shape}")
 
-                obs[target_node][target_node] = -1
+                obs[target_node][target_node] = 3
 
                 self.episode_costs.append(self.defender_action_costs[target_action])
 
@@ -414,8 +465,8 @@ class AutonomousDefenceEnv(AECEnv):
         exploitability = self.global_state["vulnMetrics"]["exploitabilityScore"][target_node] / 10
 
         if target_action == 0:
-            obs[target_node] = self.global_state["networkGraph"][target_node]
-            obs[:, target_node] = self.global_state["networkGraph"][target_node]
+            print("Explore topology action taken")
+            obs = utils.set_neighbors(obs, target_node, self.global_state["networkGraph"][target_node])
         else:
             # Actions 1 and 2; Identify and target vulns, respectively
             # generate random number
@@ -436,7 +487,7 @@ class AutonomousDefenceEnv(AECEnv):
         # Reset state per agent
 
         compromised_node_position = self.start_positions["attacker"]
-        attacker_obs = np.zeros((self.num_nodes, self.num_nodes))
+        attacker_obs = np.zeros((self.num_nodes, self.num_nodes), dtype=np.int64)
 
         utils.set_neighbors(attacker_obs, compromised_node_position, defender_obs[compromised_node_position])
 
@@ -452,6 +503,7 @@ class AutonomousDefenceEnv(AECEnv):
     def reward_selector(self, reward_specifier):
         reward_funcs = {
             "gabirondo": self.reward_gabirondo,
+            "gabirondo-clipped": self.reward_gabirondo_clipped,
             "reward-costs-penalty": self.reward_costs_penalty,
             "reward-costs-clipped": self.reward_costs_clipped,
             "reward-impact-penalty": self.reward_impact_penalty,
@@ -464,10 +516,19 @@ class AutonomousDefenceEnv(AECEnv):
     def reward_gabirondo(self, total_impact, total_cost):
         moves_made = self.NUM_ITERS - self.num_moves
 
-        attacker_reward = 5 * total_impact
-        defender_reward = max(0, moves_made - 5 * total_impact - total_cost)
+        attacker_reward = 10 * total_impact
+        defender_reward = max(1, moves_made - 10 * total_impact - total_cost)
         return {"attacker": attacker_reward, "defender": defender_reward}
 
+
+    def reward_gabirondo_clipped(self, total_impact, total_cost):
+        moves_made = self.NUM_ITERS - self.num_moves
+
+        impact_ratio = total_impact / self.mean_impact_score
+
+        attacker_reward = 10 * impact_ratio
+        defender_reward = max(1, moves_made - 10 * impact_ratio - total_cost)
+        return {"attacker": attacker_reward, "defender": defender_reward}
 
 
     def reward_costs_penalty(self, total_impact, total_cost):
@@ -476,14 +537,12 @@ class AutonomousDefenceEnv(AECEnv):
         return {"attacker": total_impact, "defender": defender_reward}
 
 
-
     def reward_costs_clipped(self, total_impact, total_cost):
-        defender_reward = max(0, self.mean_impact_score * self.num_nodes - total_impact - 0.1 * total_cost)
+        defender_reward = max(0, self.mean_impact_score * self.num_nodes - total_impact - 0.5 * total_cost)
 
         return {"attacker": total_impact, "defender": defender_reward}
 
 
-    
     def reward_impact_penalty(self, total_impact, total_cost):
         defender_reward = self.mean_impact_score * self.num_nodes - total_impact - 0 * total_cost
         return {"attacker": total_impact, "defender": defender_reward}
@@ -500,17 +559,17 @@ class AutonomousDefenceEnv(AECEnv):
 
 
     def reward(self):
-        reward = {"attacker": self.valid_actions["attacker"], "defender": self.valid_actions["defender"]}
+        reward = {"attacker": 0, "defender": 0}
 
         self.valid_actions = {agent: 0 for agent in self.agents}
 
         exploited_nodes = np.where(self.global_state["networkGraph"] == 2)[0]
         impact_scores = [self.global_state["vulnMetrics"]["impactScore"][node] for node in exploited_nodes] 
-        total_impact = sum(impact_scores)
-        total_cost = sum(self.episode_costs)
+        self.total_impact = sum(impact_scores)
+        self.total_cost = sum(self.episode_costs)
         defender_reward_func = self.reward_selector(os.getenv("RL_SDN_REWARD", "reward-costs-clipped").strip())
 
-        rewards = defender_reward_func(total_impact, total_cost)
+        rewards = defender_reward_func(self.total_impact, self.total_cost)
 
         winner_rewards = {"attacker": rewards["attacker"], "defender": rewards["defender"]}
 
@@ -520,7 +579,7 @@ class AutonomousDefenceEnv(AECEnv):
 
         return reward
 
-    def update_observation(self, obs, agent, action):
+    def update_observation(self, obs: np.ndarray, agent: str, action: int) -> np.ndarray:
         target_node, target_action = self._process_action(action)
 
         if agent == "attacker":
@@ -532,18 +591,6 @@ class AutonomousDefenceEnv(AECEnv):
             valid_action = self._validate_attacker_action(target_action, obs[target_node][target_node])
             valid_target = (target_node in candidate_neighbors) or obs[target_node][target_node] == 2
             action_possible = valid_target and valid_action
-
-            # Explore the topology
-            #for neighbor in neighbor_set:
-            #    # if edge exists betwen target node and neighbor
-            #    if self.global_state["networkGraph"][target_node][neighbor] == 1:
-            #        action_possible = True
-            #        break
-            #
-            #    else:
-            #        # Is this check done for all nodes or only compromised nodes?
-            #        # remove edge from adjacency matrix
-            #        obs[target_node][neighbor] = 0
 
             if action_possible:
                 obs = self._attacker_step(obs, action)
@@ -570,16 +617,16 @@ class AutonomousDefenceEnv(AECEnv):
         pass
 
 
-def env():
-    '''
-    The env function wraps the environment in 3 wrappers by default. These
-    wrappers contain logic that is common to many pettingzoo environments.
-    We recommend you use at least the OrderEnforcingWrapper on your own environment
-    to provide sane error messages. You can find full documentation for these methods
-    elsewhere in the developer documentation.
-    '''
+def env() -> AECEnv:
+    """
+    Returns the environment object wrapped with wrappers for logic common to
+    PettingZoo environments.
+    Args:
+        None
+    Returns:
+        PettingZoo.AECEnv
+    """
     env = AutonomousDefenceEnv()
     env = wrappers.CaptureStdoutWrapper(env)
-    #env = wrappers.AssertOutOfBoundsWrapper(env)
     env = wrappers.OrderEnforcingWrapper(env)
     return env

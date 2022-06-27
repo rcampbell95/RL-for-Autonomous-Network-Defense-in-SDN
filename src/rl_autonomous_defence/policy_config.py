@@ -1,7 +1,9 @@
 from callbacks import SelfPlayCallback
 from ray.rllib.policy.policy import PolicySpec
+from action_mask_model import ActionMaskModel
+from ray.rllib.agents.dqn import dqn
 import os
-from ray.rllib.examples.policy.random_policy import RandomPolicy
+from random_policy import RandomPolicy
 from ray.rllib.models import ModelCatalog
 
 from utils import select_policy, string_to_bool
@@ -11,18 +13,67 @@ from AutoregressiveActionsModel import BinaryAutoregressiveDistribution, Autoreg
 #config["partial_obs"] = {"lstm": tune.grid_search([True, False])}
 
 
-if string_to_bool(os.getenv("RL_SDN_RANDOMOPPONENT", "False").strip()):
-    attacker_policy = PolicySpec(policy_class=RandomPolicy)
-else:
-    attacker_policy = PolicySpec(config={
-                        "agent_id": 0,
-                        "model": {
-                            "use_lstm": string_to_bool(os.getenv("RL_SDN_ATTACKERLSTM", False)),
-                            "vf_share_layers": False
-                            },
-                            "framework": "tf"
-                        }
-                    )
+#if string_to_bool(os.getenv("RL_SDN_RANDOMOPPONENT", "False").strip()):
+#    attacker_policy = PolicySpec(policy_class=RandomPolicy)
+#else:
+
+ModelCatalog.register_custom_model(
+    "action_mask_model",
+    ActionMaskModel,
+)
+
+attacker_config = {
+                    "model": {
+                        "use_lstm": string_to_bool(os.getenv("RL_SDN_ATTACKERLSTM", False)),
+                        "vf_share_layers": False
+                        },
+                    #"vf_loss_coeff": [0.01],
+                    "entropy_coeff": float(os.getenv("RL_SDN_ENTROPYCOEFF", "0.001").strip()),
+                    #"kl_coeff": float(os.getenv("RL_SDN_KLCOEFF", "0.3").strip()),
+                    #"num_sgd_iter": float(os.getenv("RL_SDN_SGDITER", 30)),
+                    #"vf_clip_param": float(os.getenv("RL_SDN_VFCLIP", 10)),
+                    #"lambda": float(os.getenv("RL_SDN_LAMBDA", 1)),
+                    #"gamma": float(os.getenv("RL_SDN_GAMMA", 0.99)),
+                    "clip_param": float(os.getenv("RL_SDN_CLIP", 0.3)),
+                }
+
+defender_config = {
+                    "model": {
+                        "use_lstm":  string_to_bool(os.getenv("RL_SDN_DEFENDERLSTM", False)),
+                        "vf_share_layers": False
+                    },
+                    #"vf_loss_coeff": [0.01],
+                    "entropy_coeff": float(os.getenv("RL_SDN_ENTROPYCOEFF", "0.001").strip()),
+                    #"kl_coeff": float(os.getenv("RL_SDN_KLCOEFF", "0.3").strip()),
+                    #"num_sgd_iter": float(os.getenv("RL_SDN_SGDITER", 30)),
+                    #"vf_clip_param": float(os.getenv("RL_SDN_VFCLIP", 10)),
+                    #"lambda": float(os.getenv("RL_SDN_LAMBDA", 1)),
+                    #"gamma": float(os.getenv("RL_SDN_GAMMA", 0.99)),
+                    "clip_param": float(os.getenv("RL_SDN_CLIP", 0.3)),
+
+                }
+
+if string_to_bool(os.getenv("RL_SDN_MASKEDACTIONS", False)):
+    defender_config["model"]["custom_model"]  =  "action_mask_model"
+    attacker_config["model"]["custom_model"]  =  "action_mask_model"
+
+
+
+if os.getenv("RL_SDN_ACTIONSPACE", "multi") == "autoreg":
+    ModelCatalog.register_custom_model(
+        "autoregressive_model",
+        AutoregressiveActionModel,
+    )
+    ModelCatalog.register_custom_action_dist(
+        "binary_autoreg_dist",
+        BinaryAutoregressiveDistribution,
+    )
+
+    print("Using custom mode and custom action distro")
+
+    defender_config["model"]["custom_model"] = "autoregressive_model"
+    defender_config["model"]["custom_action_dist"] = "binary_autoreg_dist"
+
 
 config = {
     "env": "AutonomousDefenceEnv",
@@ -30,28 +81,39 @@ config = {
     "log_level": "DEBUG",
     "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),
     "rollout_fragment_length": 200,
-    "num_workers": 0,
-    "num_envs_per_worker": 1,
+    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 1000),
+    "num_workers": 2,
+    "num_envs_per_worker": 4,
     "num_cpus_for_driver": 1,
+    "lr": float(os.getenv("RL_SDN_LR", 5e-4)),
+    "lr_schedule": [
+        [0, float(os.getenv("RL_SDN_LR", 5e-4))],
+        [400000, 1e-5]
+    ],
     #"min_train_timesteps_per_reporting": 5000,
-    "timesteps_per_iteration": 5000,
+    "timesteps_per_iteration": 2000,
     "framework": "tf",
+    #"eager_tracing": True,
         # Evaluate once per training iteration.
-    #"evaluation_interval": None,
+    #"evaluation_interval": 0,
     # Run evaluation on (at least) two episodes
-    #"evaluation_duration": 2,
+    #"evaluation_duration": 100,
     #"evaluation_duration_unit": "episodes",
     #"evaluation_parallel_to_training": True,
     # ... using one evaluation worker (setting this to 0 will cause
     # evaluation to run on the local evaluation worker, blocking
     # training until evaluation is done).
-    #"evaluation_num_workers": 1,
+    #"always_attach_evaluation_results": True,
+    #"evaluation_num_workers": 0,
     "tf_session_args": {
         "device_count": {
             "CPU": 2
         }
     },
     #"evaluation_config": {
+    #    "multiagent": {
+    #        "policy_mapping_fn": lambda x: x
+    #    }
         # Store videos in this relative directory here inside
         # the default output dir (~/ray_results/...).
         # Alternatively, you can specify an absolute path.
@@ -69,19 +131,32 @@ config = {
     "multiagent": {
             "policies_to_train": ["attacker", "defender"],
             "policies": {
-                "attacker": attacker_policy,
-                "defender_snapshot": PolicySpec(policy_class=RandomPolicy),
-                "defender": PolicySpec(config={
-                    "agent_id": 1,
-                    "model": {
-                        "use_lstm":  string_to_bool(os.getenv("RL_SDN_DEFENDERLSTM", False))
-                    },
-                    "framework": "tf",
-                }),
+                "attacker": PolicySpec(config=attacker_config),
+                "defender_v0": PolicySpec(policy_class=RandomPolicy), #PolicySpec(config=defender_config),
+                "attacker_v0": PolicySpec(policy_class=RandomPolicy), #PolicySpec(config=attacker_config),
+                "defender": PolicySpec(config=defender_config),
             },
             "policy_mapping_fn": select_policy,
         },
     }
+
+if string_to_bool(os.getenv("RL_SDN_EVALUATE", False)):
+    def policy_mapping_fn(agent_id, episode, worker, **kwargs):
+        if agent_id == "attacker":
+            return "attacker"
+        elif agent_id == "defender":
+            return "defender"
+
+    config["evaluation_interval"] = 1
+    config["evaluation_duration"] = 10
+    config["evaluation_duration_unit"] = "episodes"
+    config["evaluation_config"] = {
+        "multiagent": {
+            "policy_mapping_fn": policy_mapping_fn
+        }
+    }
+    config["always_attach_evaluation_results"] = True,
+
 
 if string_to_bool(os.getenv("RL_SDN_ICM", False)):
     config["exploration_config"] = {
@@ -105,30 +180,3 @@ if string_to_bool(os.getenv("RL_SDN_ICM", False)):
             "type": "StochasticSampling",
         }
     }
-
-if string_to_bool(os.getenv("RL_SDN_AUTOREG", False)):
-    ModelCatalog.register_custom_model(
-        "autoregressive_model",
-        AutoregressiveActionModel,
-    )
-    ModelCatalog.register_custom_action_dist(
-        "binary_autoreg_dist",
-        BinaryAutoregressiveDistribution,
-    )
-
-    print("Using custom mode and custom action distro")
-
-    config["multiagent"]["policies"]["defender"] = PolicySpec(config={
-                    "agent_id": 1,
-                    "model": {
-                        "custom_model": "autoregressive_model",
-                        "custom_action_dist": "binary_autoreg_dist",
-                        "use_lstm":  string_to_bool(os.getenv("RL_SDN_DEFENDERLSTM", False)),
-                        "vf_share_layers": False
-                    },
-                    "framework": "tf",
-                })
-
-if os.getenv("RL_SDN_TRAINER", "PPO").lower() == "ppo":
-    config["entropy_coeff"] = float(os.getenv("RL_SDN_ENTROPYCOEFF", "0.1").strip())
-    config["kl_coeff"] = float(os.getenv("RL_SDN_KLCOEFF", "0.3").strip())
