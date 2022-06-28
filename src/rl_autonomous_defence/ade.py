@@ -39,7 +39,7 @@ class AutonomousDefenceEnv(AECEnv):
         """
         self.action_out = os.getenv("RL_SDN_ACTIONSPACE", "multi").strip()
 
-        if self.action_out in ["autoreg", "mult"]:
+        if self.action_out in ["autoreg", "multi"]:
             self.multi_action = True
         else:
             self.multi_action = False
