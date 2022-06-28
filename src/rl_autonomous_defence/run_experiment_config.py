@@ -6,9 +6,9 @@ import itertools
 
 if __name__ == "__main__":
     NUM_TRIALS = 2
-    EXPERIMENT_NAME = os.getenv(f"RL_SDN_EXPERIMENT_NAME").strip()
+    EXPERIMENT_NAME = os.getenv("RL_SDN_EXPERIMENT_NAME").strip()
 
-    config_path = os.getenv(f"RL_SDN_EXPERIMENT_CONFIG").strip()
+    config_path = os.getenv("RL_SDN_EXPERIMENT_CONFIG").strip()
     config = json.load(open(config_path))
 
     param_grid = itertools.product(*config.values())
