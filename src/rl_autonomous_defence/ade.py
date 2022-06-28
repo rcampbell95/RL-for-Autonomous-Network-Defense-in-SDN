@@ -1,5 +1,5 @@
 from typing import Callable, Dict, Tuple
-from gym.spaces import Box, Discrete, Tuple
+from gym.spaces import Box, Discrete
 import gym
 import numpy as np
 
@@ -64,7 +64,7 @@ class AutonomousDefenceEnv(AECEnv):
         self.isopen = True
 
         if self.action_out == "multi" or self.action_out == "autoreg":
-            self.action_spaces = {agent: Tuple([Discrete(self.num_nodes), Discrete(3)]) for agent in self.possible_agents}
+            self.action_spaces = {agent: gym.spaces.Tuple([Discrete(self.num_nodes), Discrete(3)]) for agent in self.possible_agents}
         elif self.action_out == "single":
             self.action_spaces = {agent: Discrete(self.num_nodes * 3) for agent in self.possible_agents}
 
