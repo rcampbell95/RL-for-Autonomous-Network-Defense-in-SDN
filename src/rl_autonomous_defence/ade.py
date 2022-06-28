@@ -1,4 +1,4 @@
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple
 from gym.spaces import Box, Discrete, Tuple
 import gym
 import numpy as np
