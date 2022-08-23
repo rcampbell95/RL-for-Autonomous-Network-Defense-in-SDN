@@ -41,3 +41,6 @@ if __name__ == "__main__":
                         checkpoint_at_end=True,
                         local_dir=os.getenv("RL_SDN_EXPERIMENT_DIRECTORY").strip())
                         #num_samples=10)
+
+
+    ray.shutdown()

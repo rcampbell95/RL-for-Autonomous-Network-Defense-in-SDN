@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.random import default_rng
 import os
+import tensorflow as tf
 
 
 NETWORK_SAMPLE_THRESHOLD = float(os.getenv("RL_SDN_STDIS", "0.01"))
@@ -190,3 +191,34 @@ def build_random(num_nodes: int, start_position: int) -> np.ndarray:
     obs[start_position][start_position] = 3
 
     return obs
+
+def mask_target_action(node_states: tf.Tensor, target_action_mask: tf.Tensor, state: int, action: int) -> tf.Tensor:
+    indices = tf.where(tf.equal(node_states, state))[:, 0]
+    action_batch_index = tf.unique(indices).y
+
+    action_batch_index = tf.reshape(action_batch_index, (action_batch_index.shape[0], 1))
+
+    action_selected = tf.reshape(tf.fill(action_batch_index.shape[0], action), (action_batch_index.shape[0], 1))
+    action_selected = tf.cast(action_selected, dtype=tf.int64)
+
+    action_indices = tf.keras.layers.concatenate([action_batch_index, action_selected], axis=1)
+
+    target_action_mask = tf.tensor_scatter_nd_update(target_action_mask, action_indices, tf.ones(action_indices.get_shape()[0]))
+    return target_action_mask
+
+
+def set_target_node_mask(attacker_obs: tf.Tensor, mask: tf.Tensor):
+    bool_mask = tf.math.reduce_any(tf.equal(attacker_obs, 2), axis=1)
+    masked_rows = tf.boolean_mask(attacker_obs, bool_mask)
+    action_possible = tf.where(tf.equal(attacker_obs, 1))
+
+    action_batch_shape = (action_possible.get_shape()[0], 1)
+    action_batch_index = tf.reshape(action_possible[:, 0],
+                                    action_batch_shape)
+    action_possible_index = tf.reshape(action_possible[:, 2],
+                                    action_batch_shape)
+
+    action_possible = tf.keras.layers.concatenate([action_batch_index, action_possible_index], axis=1)
+
+
+    return tf.tensor_scatter_nd_update(mask, action_possible, tf.ones(action_possible.get_shape()[0]))

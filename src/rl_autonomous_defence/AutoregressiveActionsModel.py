@@ -179,16 +179,21 @@ class AutoregressiveActionModel(TFModelV2):
 
         # Base layers
         self.base_model = tf.keras.Model(obs_input, [context, value_out])
+        self.register_variables(self.base_model.variables)
         self.base_model.summary()
 
         # Autoregressive action sampler
         self.action_model = tf.keras.Model(
             [ctx_input, a1_input], [a1_logits, a2_logits]
         )
+        self.register_variables(self.action_model.variables)
         self.action_model.summary()
 
     def forward(self, input_dict, state, seq_lens):
+        BATCH = tf.shape(input_dict["obs"])[0]
         context, self._value_out = self.base_model(input_dict["obs"])
+        a1_logits, _ = self.action_model([context, tf.zeros(BATCH, 1)])
+        self.action_model([context, a1_logits])
         return context, state
 
     def value_function(self):

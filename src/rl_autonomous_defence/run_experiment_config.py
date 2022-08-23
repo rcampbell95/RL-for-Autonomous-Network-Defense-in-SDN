@@ -5,7 +5,7 @@ import itertools
 
 
 if __name__ == "__main__":
-    NUM_TRIALS = 2
+    NUM_TRIALS = 5
     EXPERIMENT_NAME = os.getenv("RL_SDN_EXPERIMENT_NAME").strip()
 
     config_path = os.getenv("RL_SDN_EXPERIMENT_CONFIG").strip()

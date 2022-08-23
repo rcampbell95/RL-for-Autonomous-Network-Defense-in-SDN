@@ -1,78 +1,10 @@
 from callbacks import SelfPlayCallback
 from ray.rllib.policy.policy import PolicySpec
-from action_mask_model import ActionMaskModel
-from ray.rllib.agents.dqn import dqn
 import os
 from random_policy import RandomPolicy
-from ray.rllib.models import ModelCatalog
 
 from utils import select_policy, string_to_bool
-from AutoregressiveActionsModel import BinaryAutoregressiveDistribution, AutoregressiveActionModel
-
-
-#config["partial_obs"] = {"lstm": tune.grid_search([True, False])}
-
-
-#if string_to_bool(os.getenv("RL_SDN_RANDOMOPPONENT", "False").strip()):
-#    attacker_policy = PolicySpec(policy_class=RandomPolicy)
-#else:
-
-ModelCatalog.register_custom_model(
-    "action_mask_model",
-    ActionMaskModel,
-)
-
-attacker_config = {
-                    "model": {
-                        "use_lstm": string_to_bool(os.getenv("RL_SDN_ATTACKERLSTM", False)),
-                        "vf_share_layers": False
-                        },
-                    #"vf_loss_coeff": [0.01],
-                    "entropy_coeff": float(os.getenv("RL_SDN_ENTROPYCOEFF", "0.001").strip()),
-                    #"kl_coeff": float(os.getenv("RL_SDN_KLCOEFF", "0.3").strip()),
-                    #"num_sgd_iter": float(os.getenv("RL_SDN_SGDITER", 30)),
-                    #"vf_clip_param": float(os.getenv("RL_SDN_VFCLIP", 10)),
-                    #"lambda": float(os.getenv("RL_SDN_LAMBDA", 1)),
-                    #"gamma": float(os.getenv("RL_SDN_GAMMA", 0.99)),
-                    "clip_param": float(os.getenv("RL_SDN_CLIP", 0.3)),
-                }
-
-defender_config = {
-                    "model": {
-                        "use_lstm":  string_to_bool(os.getenv("RL_SDN_DEFENDERLSTM", False)),
-                        "vf_share_layers": False
-                    },
-                    #"vf_loss_coeff": [0.01],
-                    "entropy_coeff": float(os.getenv("RL_SDN_ENTROPYCOEFF", "0.001").strip()),
-                    #"kl_coeff": float(os.getenv("RL_SDN_KLCOEFF", "0.3").strip()),
-                    #"num_sgd_iter": float(os.getenv("RL_SDN_SGDITER", 30)),
-                    #"vf_clip_param": float(os.getenv("RL_SDN_VFCLIP", 10)),
-                    #"lambda": float(os.getenv("RL_SDN_LAMBDA", 1)),
-                    #"gamma": float(os.getenv("RL_SDN_GAMMA", 0.99)),
-                    "clip_param": float(os.getenv("RL_SDN_CLIP", 0.3)),
-
-                }
-
-if string_to_bool(os.getenv("RL_SDN_MASKEDACTIONS", False)):
-    defender_config["model"]["custom_model"]  =  "action_mask_model"
-    attacker_config["model"]["custom_model"]  =  "action_mask_model"
-
-
-
-if os.getenv("RL_SDN_ACTIONSPACE", "multi") == "autoreg":
-    ModelCatalog.register_custom_model(
-        "autoregressive_model",
-        AutoregressiveActionModel,
-    )
-    ModelCatalog.register_custom_action_dist(
-        "binary_autoreg_dist",
-        BinaryAutoregressiveDistribution,
-    )
-
-    print("Using custom mode and custom action distro")
-
-    defender_config["model"]["custom_model"] = "autoregressive_model"
-    defender_config["model"]["custom_action_dist"] = "binary_autoreg_dist"
+from agent_config import ATTACKER_CONFIG, DEFENDER_CONFIG
 
 
 config = {
@@ -80,21 +12,21 @@ config = {
     "callbacks": SelfPlayCallback,
     "log_level": "DEBUG",
     "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),
-    "rollout_fragment_length": 200,
-    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 1000),
+    "rollout_fragment_length": 250,
+    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 5000),
+    "timesteps_per_iteration": 10000,
     "num_workers": 2,
-    "num_envs_per_worker": 4,
-    "num_cpus_for_driver": 1,
-    "lr": float(os.getenv("RL_SDN_LR", 5e-4)),
+    "num_envs_per_worker": 5,
+    "num_cpus_for_driver": 2,
+    "lr": float(os.getenv("RL_SDN_LR", 3e-4)),
     "lr_schedule": [
-        [0, float(os.getenv("RL_SDN_LR", 5e-4))],
-        [400000, 1e-5]
+        [0, float(os.getenv("RL_SDN_LR", 3e-4))],
+        [int(os.getenv("RL_SDN_TIMESTEPS", "45000").strip()), 1e-5]
     ],
     #"min_train_timesteps_per_reporting": 5000,
-    "timesteps_per_iteration": 2000,
-    "framework": "tf",
-    #"eager_tracing": True,
-        # Evaluate once per training iteration.
+    "batch_mode": "complete_episodes",
+    "framework": "tfe",
+    # Evaluate once per training iteration.
     #"evaluation_interval": 0,
     # Run evaluation on (at least) two episodes
     #"evaluation_duration": 100,
@@ -131,10 +63,10 @@ config = {
     "multiagent": {
             "policies_to_train": ["attacker", "defender"],
             "policies": {
-                "attacker": PolicySpec(config=attacker_config),
+                "attacker": PolicySpec(config=ATTACKER_CONFIG),
                 "defender_v0": PolicySpec(policy_class=RandomPolicy), #PolicySpec(config=defender_config),
                 "attacker_v0": PolicySpec(policy_class=RandomPolicy), #PolicySpec(config=attacker_config),
-                "defender": PolicySpec(config=defender_config),
+                "defender": PolicySpec(config=DEFENDER_CONFIG),
             },
             "policy_mapping_fn": select_policy,
         },
@@ -158,6 +90,7 @@ if string_to_bool(os.getenv("RL_SDN_EVALUATE", False)):
     config["always_attach_evaluation_results"] = True,
 
 
+"""
 if string_to_bool(os.getenv("RL_SDN_ICM", False)):
     config["exploration_config"] = {
         "type": "Curiosity",  # <- Use the Curiosity module for exploring.
@@ -180,3 +113,4 @@ if string_to_bool(os.getenv("RL_SDN_ICM", False)):
             "type": "StochasticSampling",
         }
     }
+"""

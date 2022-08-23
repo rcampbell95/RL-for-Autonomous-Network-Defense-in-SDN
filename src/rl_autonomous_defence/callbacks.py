@@ -5,27 +5,28 @@ Custom metric to record winner for win percentage
 from typing import Dict
 import math
 import numpy as np
+from collections import defaultdict
 
-import ray
-from ray import tune
 from ray.rllib.env import BaseEnv
 from ray.rllib.policy import Policy
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.evaluation import MultiAgentEpisode, RolloutWorker
 from ray.rllib.agents.callbacks import DefaultCallbacks
-from action_mask_model import ActionMaskModel
-
 
 from rl_autonomous_defence.utils import string_to_bool
 import os
 
-import scipy
+from agent_config import (
+    ATTACKER_CONFIG,
+    DEFENDER_CONFIG
+) 
 
 
 class SelfPlayCallback(DefaultCallbacks):
     def __init__(self):
         super().__init__()
-        self.actions = {"attacker": [], "defender": []}
+        self.agents = ["attacker", "defender"]
+        self.actions = defaultdict(list)
 
         self.current_opponent = 0
         self.attacker_policies = []
@@ -33,8 +34,8 @@ class SelfPlayCallback(DefaultCallbacks):
 
         self.win_rate_start = float(os.getenv("RL_SDN_WINTHRESH", 0))
 
-        self.opponents = {"attacker": 0, "defender": 0}
-        self.win_rate_thresholds = {"attacker": self.win_rate_start, "defender": self.win_rate_start}
+        self.opponents = defaultdict(int) #{agent: 0 for agent in self.agents}
+        self.win_rate_thresholds = {agent: self.win_rate_start for agent in self.agents}
 
         self.recent_agents_probs = float(os.getenv("RL_SDN_RECENT-AGENT-PROBS", 0.8))
         self.top_k_percent = float(os.getenv("RL_SDN_TOP-K", 0.1))
@@ -42,21 +43,21 @@ class SelfPlayCallback(DefaultCallbacks):
         self.opponent_snapshot_freq = float(os.getenv("RL_SDN_SNAPSHOT-FREQ", 10))
 
         self.rng = np.random.default_rng()
-        self.opponent_pool_probs = {"attacker": [1], "defender": [1]}
-        self.environment_randomness = float(os.getenv("RL_SDN_CURRICULA-SCALE", 4e-3))
-
+        self.opponent_pool_probs = {agent: [1] for agent in self.agents}
+        self.environment_randomness = float(os.getenv("RL_SDN_CURRICULA-SCALE", 5e-4))
 
     def _update_opponent(self, agent, trainer, result):
         try:
-            opponent_reward = result["hist_stats"].pop(f"policy_{agent}_reward")
+            win_count = result["hist_stats"].pop(f"{agent}_win_count")
         except Exception as e:
             print(result["hist_stats"])
             raise e
         won = 0
-        for reward in opponent_reward:
-            if reward > 0:
+        for win in win_count:
+            if win > 0:
                 won += 1
-        win_rate = won / len(opponent_reward)
+        win_rate = won / len(win_count) if len(win_count) > 0 else 0
+        
         result[f"{agent}_pool_win_rate"] = win_rate
 
         #steps_since_update = result["num_env_steps_sampled"] - self.last_added[agent] 
@@ -78,8 +79,6 @@ class SelfPlayCallback(DefaultCallbacks):
             try:
                 assert len(self.opponent_pool_probs[agent]) == (self.opponents[agent] + 1)
             except Exception as e:
-                print(len(self.opponent_pool_probs[agent]))
-                print(self.opponents[agent])
                 raise e
 
             # Re-define the mapping function, such that "main" is forced
@@ -114,26 +113,32 @@ class SelfPlayCallback(DefaultCallbacks):
                         },
                         "framework": "tf",
                     }
-            if string_to_bool(os.getenv("RL_SDN_MASKEDACTIONS", False)):
-                config = {
-                    "model": {
-                            "custom_model": "action_mask_model"
-                    }
-                }
-
+            if string_to_bool(os.getenv("RL_SDN_MASKEDACTIONS", True)):
+                if "attacker" in agent:
+                    model_name = "attacker_action_mask_model"
+                    config = ATTACKER_CONFIG
+                elif "defender" in agent:
+                    model_name = "defender_action_mask_model"
+                    config = DEFENDER_CONFIG
             new_policy = trainer.add_policy(
                 policy_id=new_pol_id,
                 policy_cls=type(trainer.get_policy(agent)),
                 config=config,
                 policy_mapping_fn=policy_mapping_fn,
-                action_space=trainer.get_policy(agent).action_space
+                action_space=trainer.get_policy(agent).action_space,
+                policies_to_train=["attacker", "defender"]
             )
-
             # Set the weights of the new policy to the main policy.
             # We'll keep training the main policy, whereas `new_pol_id` will
             # remain fixed.
             opponent_state = trainer.get_policy(agent).get_state()
-            new_policy.set_state(opponent_state)
+            try:
+                new_policy.set_state(opponent_state)
+            except AssertionError as e:
+                print("Opponent state: ", opponent_state)
+                print("Agent", agent)
+                print("Agent policy", type(trainer.get_policy(agent)))
+                print()
             # We need to sync the just copied local weights (from main policy)
             # to all the remote workers as well.
             trainer.workers.sync_weights()
@@ -169,31 +174,53 @@ class SelfPlayCallback(DefaultCallbacks):
 
 
     def on_train_result(self, *, trainer, result, **kwargs):
-        # Get the win rate for the train batch.
+        # F: the win rate for the train batch.
         # Note that normally, one should set up a proper evaluation config,
         # such that evaluation always happens on the already updated policy,
         # instead of on the already used train_batch.
 
         # We need to sync the just copied local weights (from main policy)
         # to all the remote workers as well.
-        
-        self._update_opponent("attacker", trainer, result)
-        self._update_opponent("defender", trainer, result)
+        if "attacker_win_count" in result["hist_stats"]:
+            self._update_opponent("attacker", trainer, result)
+        if "defender_win_count" in result["hist_stats"]:
+            self._update_opponent("defender", trainer, result)
 
 
-    def check_winner(self, episode):
-        
-        attacker_policy = episode.policy_for("attacker")
-        attacker_reward = episode.last_reward_for("attacker")
+    def check_winner(self, env, episode):
+        if env.winner == "draw":
+            winner = "draw"
+        elif env.winner != "draw":
+            winner = episode.policy_for(env.winner)
+            trainable_has_won = 1 if winner in self.agents else 0
 
-        defender_policy = episode.policy_for("defender")
-        defender_reward = episode.last_reward_for("defender")
+            print(f"Winner policy: {winner}")
 
-        if attacker_reward > 0:
+            agent_id = "attacker" if "attacker" in winner else "defender"
+            if trainable_has_won:
+                trainable = winner
+            elif not trainable_has_won:
+                trainable = self.agents[self.agents.index(agent_id) - 1]
+            
+
+            # if trainable_has_won:
+            attacker_policy = episode.policy_for("attacker")
+            defender_policy = episode.policy_for("defender")
+
+            episode.custom_metrics[f"{trainable}_win_count"] = trainable_has_won
+            episode.hist_data[f"{trainable}_win_count"].append(trainable_has_won)
+            #else:
+            #    agent_id = "attacker" if "attacker" in winner else "defender"
+            #    loser = self.agents[self.agents.index(agent_id) - 1]
+
+            #    episode.custom_metrics[f"{loser}_win_count"] = trainable_has_won
+            #    episode.hist_data[f"{loser}_win_count"].append(trainable_has_won)
+
+        if winner == "attacker":
             return attacker_policy
-        elif defender_reward > 0:
+        elif winner == "defender":
             return defender_policy
-        elif attacker_reward == 0 and defender_reward == 0:
+        elif winner == "draw":
             return "tie"
 
 
@@ -217,6 +244,8 @@ class SelfPlayCallback(DefaultCallbacks):
         episode.hist_data["defender_total_impact"] = []
         episode.hist_data["defender_total_cost"] = []
 
+        episode.hist_data["attacker_win_count"] = []
+        episode.hist_data["defender_win_count"] = []
 
         episode.custom_metrics["recent_agents_probs"] = self.recent_agents_probs
 
@@ -233,16 +262,16 @@ class SelfPlayCallback(DefaultCallbacks):
     def on_episode_end(self, worker: RolloutWorker, base_env: BaseEnv,
                        policies: Dict[str, Policy], episode: MultiAgentEpisode,
                        **kwargs):
-        winner = self.check_winner(episode)
+        unwrapped_env = base_env.get_unwrapped()[0].env.unwrapped
+
+        winner = self.check_winner(unwrapped_env, episode)
 
         attacker_policy = episode.policy_for("attacker")
-
         agent = "attacker" if attacker_policy == "attacker" else "defender"
         
         episode.custom_metrics[f"{agent}_win"] = 1 if winner == agent else 0
         episode.hist_data[f"{agent}_wins"].append(episode.custom_metrics[f"{agent}_win"])
 
-        unwrapped_env = base_env.get_unwrapped()[0].env.unwrapped
         if winner == agent:
             episode.custom_metrics[f"{agent}_total_impact"] = unwrapped_env.total_impact 
             episode.hist_data[f"{agent}_total_impact"].append(episode.custom_metrics[f"{agent}_total_impact"])
@@ -261,8 +290,16 @@ class SelfPlayCallback(DefaultCallbacks):
         stdis_current = float(os.getenv("RL_SDN_STDIS", "0.01"))
         stdes_current = float(os.getenv("RL_SDN_STDES", "0.01"))
 
-        os.environ["RL_SDN_STDIS"] = str(min(1, stdis_current + (stdis_current * self.environment_randomness)))
-        os.environ["RL_SDN_STDES"] = str(min(1, stdes_current + (stdes_current * self.environment_randomness)))
+        network_size_current = float(os.getenv("RL_SDN_NETWORKSIZE", "8"))
+        network_size_max = int(os.getenv("RL_SDN_NETWORKSIZE-MAX", "8"))
+        
+        update_network_size = min(network_size_max, network_size_current + .1)
+        os.environ["RL_SDN_NETWORKSIZE"] = str(float(update_network_size))
+        
+        episode.custom_metrics["curr_network_size"] = int(update_network_size)
+
+        os.environ["RL_SDN_STDIS"] = str(min(1, stdis_current + self.environment_randomness))
+        os.environ["RL_SDN_STDES"] = str(min(1, stdes_current + self.environment_randomness))
 
         episode.custom_metrics["impact_score_std"] = float(os.getenv("RL_SDN_STDIS", "0.01"))
         episode.custom_metrics["exploitability_score_std"] = float(os.getenv("RL_SDN_STDES", "0.01"))
@@ -273,6 +310,7 @@ class SelfPlayCallback(DefaultCallbacks):
             agent_id: str, policy_id: str, policies: Dict[str, Policy],
             postprocessed_batch: SampleBatch,
             original_batches: Dict[str, SampleBatch], **kwargs):
+
         if "num_batches" not in episode.custom_metrics:
             episode.custom_metrics["num_batches"] = 0
         episode.custom_metrics["num_batches"] += 1 
