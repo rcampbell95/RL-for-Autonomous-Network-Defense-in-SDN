@@ -15,7 +15,8 @@ from rl_autonomous_defence.CheckpointWrapper import CheckpointWrapperPPO
 
 
 if __name__ == "__main__":
-    ray.init(log_to_driver=False, num_cpus=4)
+    ray.init(log_to_driver=False,
+             num_cpus=4)
 
     register_env('AutonomousDefenceEnv', lambda x: ParallelPettingZooEnv(ade.env()))
 

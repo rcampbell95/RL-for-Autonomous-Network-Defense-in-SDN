@@ -7,3 +7,4 @@ PettingZoo==1.18.1
 python-dateutil==2.8.2
 ray==1.13.0
 tensorflow==2.5.0
+pygame==2.1.2

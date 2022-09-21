@@ -2,6 +2,7 @@ import subprocess
 import os
 import json
 import itertools
+import ray
 
 
 if __name__ == "__main__":
@@ -25,6 +26,9 @@ if __name__ == "__main__":
             trial_name = "_".join([f"{key}={str(value)}" for key, value in params.items()])
             os.environ["RL_SDN_EXPERIMENT_DIRECTORY"] = f"./ray_results/{EXPERIMENT_NAME}/{trial_name}"
 
-            subprocess.run(["python", "./src/rl_autonomous_defence/tune.py"])
+            try:
+                subprocess.run(["python", "./src/rl_autonomous_defence/tune.py"])
+            except Exception as e:
+                ray.shutdown()
 
             
