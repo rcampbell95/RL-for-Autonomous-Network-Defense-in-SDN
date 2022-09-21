@@ -1,29 +1,23 @@
 #Create new Trainer and restore its state from the last checkpoint.
+import os
+import pickle
 
 from ray.rllib.agents.registry import get_trainer_class
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.env import PettingZooEnv
 from ray.rllib.policy.policy import PolicySpec
+from ray.tune.registry import register_env
+from gym.wrappers.monitoring.video_recorder import VideoRecorder
+
 import numpy as np
 import tensorflow as tf
-
-from ray.tune.registry import register_env
-
-import os
-
-import ade
-import policy_config
 import pandas as pd
-import pickle
 
-import utils
-import os
-
-import tensorflow as tf
-
-from action_mask_model import ActionMaskModel
-from gym.wrappers.monitoring.video_recorder import VideoRecorder
-from serve_client import get_action, DEFENDER_URL, ATTACKER_URL
+from rl_autonomous_defence import utils
+from rl_autonomous_defence import ade
+from rl_autonomous_defence import policy_config
+from rl_autonomous_defence.action_mask_model import ActionMaskModel
+from rl_autonomous_defence.serve_client import get_action, DEFENDER_URL, ATTACKER_URL
 
 
 register_env('AutonomousDefenceEnv', lambda x: PettingZooEnv(ade.env()))

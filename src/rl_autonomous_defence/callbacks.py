@@ -1,11 +1,12 @@
 """
 Custom metric to record winner for win percentage
 """
-
+import os
 from typing import Dict
 import math
-import numpy as np
 from collections import defaultdict
+
+import numpy as np
 
 from ray.rllib.env import BaseEnv
 from ray.rllib.policy import Policy
@@ -14,9 +15,8 @@ from ray.rllib.evaluation import MultiAgentEpisode, RolloutWorker
 from ray.rllib.agents.callbacks import DefaultCallbacks
 
 from rl_autonomous_defence.utils import string_to_bool
-import os
 
-from agent_config import (
+from rl_autonomous_defence.agent_config import (
     ATTACKER_CONFIG,
     DEFENDER_CONFIG
 ) 
@@ -103,23 +103,12 @@ class SelfPlayCallback(DefaultCallbacks):
                         return f"{agent_id}_v{agent_selection}"
 
             config = {}
-            if os.getenv("RL_SDN_AUTOREG") == "autoreg" and agent == "defender":
-                config = {
-                        "model": {
-                            "custom_model": "autoregressive_model",
-                            "custom_action_dist": "binary_autoreg_dist",
-                            "use_lstm":  string_to_bool(os.getenv("RL_SDN_DEFENDERLSTM", False)),
-                            "vf_share_layers": False
-                        },
-                        "framework": "tf",
-                    }
-            if string_to_bool(os.getenv("RL_SDN_MASKEDACTIONS", True)):
-                if "attacker" in agent:
-                    model_name = "attacker_action_mask_model"
-                    config = ATTACKER_CONFIG
-                elif "defender" in agent:
-                    model_name = "defender_action_mask_model"
-                    config = DEFENDER_CONFIG
+            if "attacker" in agent:
+                config = ATTACKER_CONFIG
+            elif "defender" in agent:
+                config = DEFENDER_CONFIG
+            else:
+                raise Exception("Agent id is neither: {defender, attacker}")
             new_policy = trainer.add_policy(
                 policy_id=new_pol_id,
                 policy_cls=type(trainer.get_policy(agent)),
@@ -138,7 +127,6 @@ class SelfPlayCallback(DefaultCallbacks):
                 print("Opponent state: ", opponent_state)
                 print("Agent", agent)
                 print("Agent policy", type(trainer.get_policy(agent)))
-                print()
             # We need to sync the just copied local weights (from main policy)
             # to all the remote workers as well.
             trainer.workers.sync_weights()
@@ -304,6 +292,17 @@ class SelfPlayCallback(DefaultCallbacks):
         episode.custom_metrics["impact_score_std"] = float(os.getenv("RL_SDN_STDIS", "0.01"))
         episode.custom_metrics["exploitability_score_std"] = float(os.getenv("RL_SDN_STDES", "0.01"))
 
+
+    def on_learn_batch(self, policy,
+                       train_batch: SampleBatch, result: dict):
+        pass
+        #rewards = train_batch["rewards"]
+
+        #normalized_rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+
+        #train_batch["rewards"] = normalized_rewards
+
+        
 
     def on_postprocess_trajectory(
             self, worker: RolloutWorker, episode: MultiAgentEpisode,

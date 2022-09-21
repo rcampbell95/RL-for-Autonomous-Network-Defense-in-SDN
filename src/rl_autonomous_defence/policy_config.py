@@ -1,10 +1,10 @@
-from callbacks import SelfPlayCallback
+from rl_autonomous_defence.callbacks import SelfPlayCallback
 from ray.rllib.policy.policy import PolicySpec
 import os
 from random_policy import RandomPolicy
 
-from utils import select_policy, string_to_bool
-from agent_config import ATTACKER_CONFIG, DEFENDER_CONFIG
+from rl_autonomous_defence.utils import select_policy, string_to_bool
+from rl_autonomous_defence.agent_config import ATTACKER_CONFIG, DEFENDER_CONFIG
 
 
 config = {
@@ -13,8 +13,9 @@ config = {
     "log_level": "DEBUG",
     "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),
     "rollout_fragment_length": 250,
-    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 5000),
-    "timesteps_per_iteration": 10000,
+    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 1000),
+    "timesteps_per_iteration": 5000,
+    "clip_rewards": 200,
     "num_workers": 2,
     "num_envs_per_worker": 5,
     "num_cpus_for_driver": 2,
@@ -88,29 +89,3 @@ if string_to_bool(os.getenv("RL_SDN_EVALUATE", False)):
         }
     }
     config["always_attach_evaluation_results"] = True,
-
-
-"""
-if string_to_bool(os.getenv("RL_SDN_ICM", False)):
-    config["exploration_config"] = {
-        "type": "Curiosity",  # <- Use the Curiosity module for exploring.
-        "eta": float(os.getenv("RL_SDN_ETA", "0.5").strip()),  # Weight for intrinsic rewards before being added to extrinsic ones.
-        "lr": 0.001,  # Learning rate of the curiosity (ICM) module.
-        "feature_dim": 288,  # Dimensionality of the generated feature vectors.
-        # Setup of the feature net (used to encode observations into feature (latent) vectors).
-        "feature_net_config": {
-            "fcnet_hiddens": [],
-            "fcnet_activation": "relu",
-        },
-        "inverse_net_hiddens": [256],  # Hidden layers of the "inverse" model.
-        "inverse_net_activation": "relu",  # Activation of the "inverse" model.
-        "forward_net_hiddens": [256],  # Hidden layers of the "forward" model.
-        "forward_net_activation": "relu",  # Activation of the "forward" model.
-        "beta": float(os.getenv("RL_SDN_BETA", "0.2").strip()),  # Weight for the "forward" loss (beta) over the "inverse" loss (1.0 - beta).
-        # Specify, which exploration sub-type to use (usually, the algo's "default"
-        # exploration, e.g. EpsilonGreedy for DQN, StochasticSampling for PG/SAC).
-        "sub_exploration": {
-            "type": "StochasticSampling",
-        }
-    }
-"""

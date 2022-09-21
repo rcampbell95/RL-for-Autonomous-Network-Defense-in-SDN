@@ -1,8 +1,10 @@
+"""Utilities for managing policy and environment."""
+import os
+
 import numpy as np
 from numpy.random import default_rng
-import os
-import tensorflow as tf
 
+import tensorflow as tf
 
 NETWORK_SAMPLE_THRESHOLD = float(os.getenv("RL_SDN_STDIS", "0.01"))
 
@@ -191,6 +193,7 @@ def build_random(num_nodes: int, start_position: int) -> np.ndarray:
     obs[start_position][start_position] = 3
 
     return obs
+
 
 def mask_target_action(node_states: tf.Tensor, target_action_mask: tf.Tensor, state: int, action: int) -> tf.Tensor:
     indices = tf.where(tf.equal(node_states, state))[:, 0]

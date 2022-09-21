@@ -1,5 +1,4 @@
-import ray.rllib.agents.ppo as ppo
-#import ray.rllib.agents. as PG
+import os
 
 from ray.tune.registry import register_env
 # import the pettingzoo environment
@@ -7,12 +6,11 @@ from ray.tune.registry import register_env
 from ray.rllib.env import PettingZooEnv
 from ray.rllib.agents.registry import get_trainer_class
 import ray
-
 from ray import tune
-import ade
-import policy_config
-import os
-from CheckpointWrapper import CheckpointWrapperPPO
+
+from rl_autonomous_defence import ade
+from rl_autonomous_defence import policy_config
+from rl_autonomous_defence.CheckpointWrapper import CheckpointWrapperPPO
 
 
 

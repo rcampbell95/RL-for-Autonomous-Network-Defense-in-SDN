@@ -1,5 +1,5 @@
 import ray.rllib.agents.ppo as ppo
-import os
+
 
 class CheckpointWrapperPPO(ppo.PPOTrainer):
     def save_checkpoint(self, checkpoint_dir):
@@ -11,7 +11,3 @@ class CheckpointWrapperPPO(ppo.PPOTrainer):
         #    checkpoint_dirs[agent] = export_directory
 
         return checkpoint_dirs
-
-if __name__ == "__main__":
-
-    trainer = CheckpointWrapperPPO()

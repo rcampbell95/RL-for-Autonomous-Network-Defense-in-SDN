@@ -12,8 +12,7 @@ import random
 import pygame
 from pygame import gfxdraw
 
-import utils
-import gc
+from rl_autonomous_defence import utils
 
 
 class AutonomousDefenceEnv(AECEnv):
@@ -70,9 +69,9 @@ class AutonomousDefenceEnv(AECEnv):
         self.isopen = True
         self.action_valid = {0 for agent in self.possible_agents}
     
-        if self.action_out == "multi" or self.action_out == "autoreg":
+        if self.multi_action:
             self.action_spaces = {agent: action_space for agent in self.possible_agents}
-        elif self.action_out == "single":
+        elif not self.multi_action:
             self.action_spaces = {agent: Discrete(self.num_nodes * 3) for agent in self.possible_agents}
 
     def observation_space(self, agent: str) -> gym.spaces.Space:
@@ -283,8 +282,6 @@ class AutonomousDefenceEnv(AECEnv):
         # agent should start again at 0
         self._cumulative_rewards[agent] = 0
 
-        # stores action of current agent
-
         self.action_completed = False
 
         self.observations[self.agent_selection] = self.update_observation(self.observations[agent], agent, action)
@@ -480,7 +477,7 @@ class AutonomousDefenceEnv(AECEnv):
     def reward_selector(self, reward_specifier: str) -> Callable:
         reward_funcs = {
             "gabirondo": self.reward_gabirondo,
-            "gabirondo-clipped": self.reward_gabirondo_clipped,
+            "gabirondo-scaled": self.reward_gabirondo_scaled,
             "reward-costs-penalty": self.reward_costs_penalty,
             "reward-costs-clipped": self.reward_costs_clipped,
             "reward-impact-penalty": self.reward_impact_penalty,
@@ -496,13 +493,11 @@ class AutonomousDefenceEnv(AECEnv):
         defender_reward = max(1, moves_made - 10 * total_impact - total_cost)
         return {"attacker": attacker_reward, "defender": defender_reward}
 
-    def reward_gabirondo_clipped(self, total_impact: int, total_cost: int) -> Dict[str, int]:
+    def reward_gabirondo_scaled(self, total_impact: int, total_cost: int) -> Dict[str, int]:
         moves_made = self.NUM_ITERS - self.num_moves
 
-        impact_ratio = total_impact / self.mean_impact_score
-
-        attacker_reward = 10 * impact_ratio
-        defender_reward = max(1, moves_made - 10 * impact_ratio - total_cost)
+        attacker_reward = 0.1 * total_impact
+        defender_reward = max(1, 0.1 * (moves_made - total_impact - total_cost))
         return {"attacker": attacker_reward, "defender": defender_reward}
 
     def reward_costs_penalty(self, total_impact: int, total_cost: int) -> Dict[str, int]:
@@ -529,14 +524,16 @@ class AutonomousDefenceEnv(AECEnv):
         return reward
 
     def reward(self) -> Dict[str, int]:
-        reward = {"attacker": self.action_valid["attacker"], "defender": 0}
+        reward = {agent: 0 for agent in self.agents}
+        #reward = {"attacker": self.action_valid["attacker"] if "attacker" == self.agent_selection else 0,
+        #          "defender": self.action_valid["defender"] if "defender" == self.agent_selection else 0}
 
         exploited_nodes = np.where(self.global_state["networkGraph"] == 2)[0]
         impact_scores = [self.global_state["vulnMetrics"]["impactScore"][node] for node in exploited_nodes]
         self.total_impact = sum(impact_scores)
         self.total_cost = sum(self.episode_costs)
         defender_reward_func = self.reward_selector(os.getenv("RL_SDN_REWARD",
-                                                              "reward-costs-clipped").strip())
+                                                              "gabirondo").strip())
 
         rewards = defender_reward_func(self.total_impact, self.total_cost)
 
@@ -545,14 +542,15 @@ class AutonomousDefenceEnv(AECEnv):
 
         if all(self.dones.values()) and self.winner != "draw":
             reward[self.winner] = winner_rewards[self.winner]
-            reward[self.agents[1 - self.agent_name_mapping[self.winner]]] = -1 * reward[self.winner]
+            reward[self.agents[1 - self.agent_name_mapping[self.winner]]] = -1 * winner_rewards[self.winner]
         return reward
 
     def update_observation(self, obs: np.ndarray, agent: str, action: int) -> np.ndarray:
         target_node, target_action = self._process_action(action)
 
-        if target_node >= self.num_nodes:
-            target_node = np.random.randint(32)
+        #if target_node >= self.num_nodes:
+        #    target_node = np.random.randint(self.num_nodes)
+        assert target_node < self.num_nodes
 
         if agent == "attacker":
             # choose a random node from list of neighbors
@@ -568,7 +566,7 @@ class AutonomousDefenceEnv(AECEnv):
                 obs = self._attacker_step(obs, action)
                 self.action_valid["attacker"] = 0
             else:
-                self.action_valid["attacker"] = -1
+                self.action_valid["attacker"] = -0.5
         elif agent == "defender":
 
             action_possible = self._validate_defender_action(target_action,
@@ -578,7 +576,7 @@ class AutonomousDefenceEnv(AECEnv):
                 obs = self._defender_step(obs, action)
                 self.action_valid["defender"] = 0
             else:
-                self.action_valid["defender"] = -1
+                self.action_valid["defender"] = -0.5
 
         return obs
 
