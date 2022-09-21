@@ -26,7 +26,10 @@ class AutonomousDefenceEnv(AECEnv):
     The "name" metadata allosws the environment to be pretty printed.
     """
 
-    metadata = {'render.modes': ['rgb_array', 'human'], "name": "ad_v1", "emulate_network": False}
+    metadata = {'render.modes': ['rgb_array', 'human'],
+                "render_modes": ['rgb_array', 'human'],
+                "name": "ad_v1",
+                "emulate_network": False}
 
     def __init__(self) -> None:
         """
