@@ -3,7 +3,7 @@ import os
 from ray.tune.registry import register_env
 # import the pettingzoo environment
 # import rllib pettingzoo interface
-from ray.rllib.env import PettingZooEnv
+from ray.rllib.env.wrappers.pettingzoo_env import ParallelPettingZooEnv
 from ray.rllib.agents.registry import get_trainer_class
 import ray
 from ray import tune
@@ -17,7 +17,7 @@ from rl_autonomous_defence.CheckpointWrapper import CheckpointWrapperPPO
 if __name__ == "__main__":
     ray.init(log_to_driver=False, num_cpus=4)
 
-    register_env('AutonomousDefenceEnv', lambda x: PettingZooEnv(ade.env()))
+    register_env('AutonomousDefenceEnv', lambda x: ParallelPettingZooEnv(ade.env()))
 
     stop = {
         #"episodes_total": 150,

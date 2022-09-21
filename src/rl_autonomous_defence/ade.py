@@ -6,6 +6,7 @@ import numpy as np
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 from pettingzoo.utils import wrappers
+from pettingzoo.utils import aec_to_parallel
 import os
 import random
 
@@ -44,6 +45,9 @@ class AutonomousDefenceEnv(AECEnv):
         else:
             self.multi_action = False
         self.possible_agents = ["attacker", "defender"]
+        self._agent_selector = agent_selector(self.possible_agents)
+        self.agent_selection = self._agent_selector.next()
+        self._agent_ids = ["attacker", "defender"]
         self.num_nodes = int(float(os.getenv("RL_SDN_NETWORKSIZE", "8").strip()))
         self.max_num_nodes = int(os.getenv("RL_SDN_NETWORKSIZE-MAX", str(self.num_nodes)).strip())
         self.agent_name_mapping = dict(zip(self.possible_agents,
@@ -75,20 +79,10 @@ class AutonomousDefenceEnv(AECEnv):
             self.action_spaces = {agent: Discrete(self.num_nodes * 3) for agent in self.possible_agents}
 
     def observation_space(self, agent: str) -> gym.spaces.Space:
-        if "attacker" in agent:
-            return self.observation_spaces["attacker"]
-        elif "defender" in agent:
-            return self.observation_spaces["defender"]
-        else:
-            return self.observation_spaces["attacker"]
+        return self.observation_spaces[agent]
 
     def action_space(self, agent: str) -> gym.spaces.Space:
-        if "attacker" in agent:
-            return self.action_spaces["attacker"]
-        elif "defender" in agent:
-            return self.action_spaces["defender"]
-        else:
-            return self.action_spaces["attacker"]
+        return self.action_spaces[agent]
 
     def render(self, mode: str = "rgb_array") -> np.ndarray:
         """
@@ -229,7 +223,6 @@ class AutonomousDefenceEnv(AECEnv):
         self.winner = "draw"
 
         # Agent selector cycles through agents
-        self._agent_selector = agent_selector(self.agents)
         self.agent_selection = self._agent_selector.next()
 
     def reset_observations(self) -> Dict[str, np.ndarray]:
@@ -249,10 +242,18 @@ class AutonomousDefenceEnv(AECEnv):
         np.fill_diagonal(self.global_state["networkGraph"], 0)
         self.global_state["networkGraph"][compromised_node_position][compromised_node_position] = 2
 
-        return {"defender": defender_obs.copy(), "attacker": attacker_obs.copy()}
+        observations = {agent: None for agent in self.agents}
+
+        for agent in observations.keys():
+            if "attacker" in agent:
+                observations[agent] = attacker_obs
+            elif "defender" in agent:
+                observations[agent] = defender_obs
+
+        return observations
 
 
-    def step(self, action: int) -> None:
+    def step(self, actions: int) -> None:
         """
         Takes an action for the current agent (specified by
         agent_selection) and updates internal state.
@@ -369,13 +370,13 @@ class AutonomousDefenceEnv(AECEnv):
         return check_status or isolate_node or move_flag
 
     def _check_win_conditions(self, agent: str) -> bool:
-        if agent == "attacker":
+        if "attacker" in agent:
             flag_node_index = np.where(self.observations["defender"] == 3)[0]
             flag_node_compromised = self.global_state["networkGraph"].diagonal()[flag_node_index] == 2
             if flag_node_compromised:
                 self.winner = agent
                 return True
-        elif agent == "defender":
+        elif "defender" in agent:
             if utils.attacker_is_isolated(self.global_state["networkGraph"]):
                 self.winner = agent
                 return True
@@ -486,12 +487,16 @@ class AutonomousDefenceEnv(AECEnv):
 
         return reward_funcs[reward_specifier]
 
-    def reward_gabirondo(self, total_impact: int, total_cost: int) -> Dict[str, int]:
+    def reward_gabirondo(self, total_impact: int, total_cost: int, agent: str) -> int:
         moves_made = self.NUM_ITERS - self.num_moves
 
         attacker_reward = 10 * total_impact
         defender_reward = max(1, moves_made - 10 * total_impact - total_cost)
-        return {"attacker": attacker_reward, "defender": defender_reward}
+
+        if "attacker" in agent:
+            return attacker_reward
+        elif "defender" in agent:
+            return defender_reward
 
     def reward_gabirondo_scaled(self, total_impact: int, total_cost: int) -> Dict[str, int]:
         moves_made = self.NUM_ITERS - self.num_moves
@@ -532,13 +537,10 @@ class AutonomousDefenceEnv(AECEnv):
         impact_scores = [self.global_state["vulnMetrics"]["impactScore"][node] for node in exploited_nodes]
         self.total_impact = sum(impact_scores)
         self.total_cost = sum(self.episode_costs)
-        defender_reward_func = self.reward_selector(os.getenv("RL_SDN_REWARD",
+        reward_func = self.reward_selector(os.getenv("RL_SDN_REWARD",
                                                               "gabirondo").strip())
 
-        rewards = defender_reward_func(self.total_impact, self.total_cost)
-
-        winner_rewards = {"attacker": rewards["attacker"],
-                          "defender": rewards["defender"]}
+        winner_rewards = {agent: reward_func(self.total_impact, self.total_cost, agent) for agent in self.agents}
 
         if all(self.dones.values()) and self.winner != "draw":
             reward[self.winner] = winner_rewards[self.winner]
@@ -599,4 +601,4 @@ def env() -> AECEnv:
     env = AutonomousDefenceEnv()
     env = wrappers.CaptureStdoutWrapper(env)
     env = wrappers.OrderEnforcingWrapper(env)
-    return env
+    return aec_to_parallel(env)

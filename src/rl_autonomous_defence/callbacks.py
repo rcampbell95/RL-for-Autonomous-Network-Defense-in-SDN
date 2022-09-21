@@ -14,7 +14,10 @@ from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.evaluation import MultiAgentEpisode, RolloutWorker
 from ray.rllib.agents.callbacks import DefaultCallbacks
 
-from rl_autonomous_defence.utils import string_to_bool
+from rl_autonomous_defence.utils import (
+    string_to_bool,
+    elo_score
+)
 
 from rl_autonomous_defence.agent_config import (
     ATTACKER_CONFIG,
@@ -86,16 +89,16 @@ class SelfPlayCallback(DefaultCallbacks):
             # (excluding "random").
             def policy_mapping_fn(agent_id, episode, worker, **kwargs):
                 if (episode.episode_id % 2) == 0:
-                    if agent_id == "attacker":
+                    if "attacker" in agent_id:
                         agents = list(range(0, self.opponents[agent_id] + 1))
                         agent_selection = self.rng.choice(agents, 1, p=self.opponent_pool_probs[agent_id]).item()
                         return f"{agent_id}_v{agent_selection}"
-                    elif agent_id == "defender":
+                    elif "defender" in agent_id:
                         return "defender"
                 else:
-                    if agent_id == "attacker":
+                    if "attacker" in agent_id:
                         return "attacker"
-                    elif agent_id == "defender":
+                    elif "defender" in agent_id:
                         #if self.opponents["defender"] == 0:
                         #    return "defender"
                         agents = list(range(0, self.opponents[agent_id] + 1))
@@ -260,6 +263,8 @@ class SelfPlayCallback(DefaultCallbacks):
         episode.custom_metrics[f"{agent}_win"] = 1 if winner == agent else 0
         episode.hist_data[f"{agent}_wins"].append(episode.custom_metrics[f"{agent}_win"])
 
+        #self.elo_ratings[winner] 
+
         if winner == agent:
             episode.custom_metrics[f"{agent}_total_impact"] = unwrapped_env.total_impact 
             episode.hist_data[f"{agent}_total_impact"].append(episode.custom_metrics[f"{agent}_total_impact"])
@@ -295,12 +300,11 @@ class SelfPlayCallback(DefaultCallbacks):
 
     def on_learn_batch(self, policy,
                        train_batch: SampleBatch, result: dict):
-        pass
-        #rewards = train_batch["rewards"]
+        rewards = train_batch["rewards"]
 
-        #normalized_rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+        normalized_rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
-        #train_batch["rewards"] = normalized_rewards
+        train_batch["rewards"] = normalized_rewards
 
         
 

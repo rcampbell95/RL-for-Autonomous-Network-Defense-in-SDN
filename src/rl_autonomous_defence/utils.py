@@ -11,14 +11,14 @@ NETWORK_SAMPLE_THRESHOLD = float(os.getenv("RL_SDN_STDIS", "0.01"))
 
 def select_policy(agent_id, episode, worker, **kwargs):
     if (episode.episode_id % 2) == 0:
-        if agent_id == "attacker":
+        if "attacker" in agent_id:
             return "attacker_v0"
-        elif agent_id == "defender":
+        elif "defender" in agent_id:
             return "defender"
     else:
-        if agent_id == "attacker":
+        if "attacker" in agent_id:
             return "attacker"
-        elif agent_id == "defender":
+        elif "defender" in agent_id:
             return "defender_v0"
 
 
@@ -225,3 +225,25 @@ def set_target_node_mask(attacker_obs: tf.Tensor, mask: tf.Tensor):
 
 
     return tf.tensor_scatter_nd_update(mask, action_possible, tf.ones(action_possible.get_shape()[0]))
+
+
+def elo_score(rating1: float, rating2: float, k: float, is_winner: bool):
+    def win_probability(rating1: float, rating2: float):
+        """Probability of agent with rating2 beating agent with rating1."""
+        return 1.0 * 1.0 / (1 + 1.0 * math.pow(10, 1.0 * (rating1 - rating2) / 400))
+
+    loser_prob = win_probability(rating1, rating2)
+    winner_prob = win_probability(rating1, rating2)
+ 
+    # Case -1 When Player A wins
+    # Updating the Elo Ratings
+    if is_winner:
+        winner_rating = winner_rating + k * (1 - winner_prob)
+    else:
+        loser_rating = loser_rating + k * (0 - loser_prob)
+
+    return (winner_rating, loser_rating)
+
+
+def partition_network():
+    pass
