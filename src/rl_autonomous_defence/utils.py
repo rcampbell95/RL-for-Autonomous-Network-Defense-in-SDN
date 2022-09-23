@@ -233,7 +233,7 @@ def elo_score(rating1: float, rating2: float, k: float, is_winner: bool):
         return 1.0 * 1.0 / (1 + 1.0 * math.pow(10, 1.0 * (rating1 - rating2) / 400))
 
     loser_prob = win_probability(rating1, rating2)
-    winner_prob = win_probability(rating1, rating2)
+    winner_prob = win_probability(rating2, rating1)
  
     # Case -1 When Player A wins
     # Updating the Elo Ratings
