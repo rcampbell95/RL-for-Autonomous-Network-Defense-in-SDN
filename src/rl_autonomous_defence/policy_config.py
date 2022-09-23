@@ -1,10 +1,10 @@
-from rl_autonomous_defence.callbacks import SelfPlayCallback
 from ray.rllib.policy.policy import PolicySpec
 import os
 from random_policy import RandomPolicy
 
 from rl_autonomous_defence.utils import select_policy, string_to_bool
 from rl_autonomous_defence.agent_config import ATTACKER_CONFIG, DEFENDER_CONFIG
+from rl_autonomous_defence.callbacks import SelfPlayCallback
 
 
 config = {

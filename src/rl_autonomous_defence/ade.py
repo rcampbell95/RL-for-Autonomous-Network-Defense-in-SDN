@@ -29,6 +29,7 @@ class AutonomousDefenceEnv(AECEnv):
     metadata = {'render.modes': ['rgb_array', 'human'],
                 "render_modes": ['rgb_array', 'human'],
                 "name": "ad_v1",
+                "is_parallelizable": True,
                 "emulate_network": False}
 
     def __init__(self) -> None:
@@ -44,13 +45,13 @@ class AutonomousDefenceEnv(AECEnv):
         self.action_out = os.getenv("RL_SDN_ACTIONSPACE", "multi").strip()
 
         if self.action_out in ["autoreg", "multi"]:
-            self.multi_action = True
+            self.multi_action =True
         else:
             self.multi_action = False
         self.possible_agents = ["attacker", "defender"]
         self._agent_selector = agent_selector(self.possible_agents)
-        self.agent_selection = self._agent_selector.next()
         self._agent_ids = ["attacker", "defender"]
+        self.dones = {agent: False for agent in self.possible_agents}
         self.num_nodes = int(float(os.getenv("RL_SDN_NETWORKSIZE", "8").strip()))
         self.max_num_nodes = int(os.getenv("RL_SDN_NETWORKSIZE-MAX", str(self.num_nodes)).strip())
         self.agent_name_mapping = dict(zip(self.possible_agents,
@@ -186,7 +187,7 @@ class AutonomousDefenceEnv(AECEnv):
             pygame.quit()
             self.isopen = False
 
-    def reset(self) -> None:
+    def reset(self, **kwargs) -> None:
         """
         Reset needs to initialize the following attributes.
 
@@ -226,7 +227,9 @@ class AutonomousDefenceEnv(AECEnv):
         self.winner = "draw"
 
         # Agent selector cycles through agents
-        self.agent_selection = self._agent_selector.next()
+        self.agent_selection = "attacker"
+
+
 
     def reset_observations(self) -> Dict[str, np.ndarray]:
         topology = os.getenv("RL_SDN_TOPOLOGY", "clique").strip()
@@ -256,7 +259,7 @@ class AutonomousDefenceEnv(AECEnv):
         return observations
 
 
-    def step(self, actions: int) -> None:
+    def step(self, actions: dict) -> None:
         """
         Takes an action for the current agent (specified by
         agent_selection) and updates internal state.
@@ -274,21 +277,21 @@ class AutonomousDefenceEnv(AECEnv):
         Returns:
             None
         """
-        if self.dones[self.agent_selection]:
+        #if self.dones[self.agent_selection]:
             # handles stepping an agent which is already done
             # accepts a None action for the one agent, and moves the agent_selection to
             # the next done agent,  or if there are no more done agents, to the next live agent
-            return self._was_done_step(action)
+        #    return self._was_done_step(actions)
 
-        agent = self.agent_selection
         # the agent which stepped last had its _cumulative_rewards accounted for
         # (because it was returned by last()), so the _cumulative_rewards for this
         # agent should start again at 0
-        self._cumulative_rewards[agent] = 0
+        self._cumulative_rewards = {agent: 0 for agent in self.agentsß}
 
         self.action_completed = False
 
-        self.observations[self.agent_selection] = self.update_observation(self.observations[agent], agent, action)
+        for agent in self.agents:
+            self.observations[agent] = self.update_observation(self.observations[agent], agent, actions[agent])
 
         self.num_moves += 1
 
@@ -296,7 +299,7 @@ class AutonomousDefenceEnv(AECEnv):
             self.dones = {agent: True for agent in self.possible_agents}
 
         if self.metadata["emulate_network"]:
-            self.send_message_to_controller(action)
+            self.send_message_to_controller(actions)
 
         self.rewards = self.reward()
         #self._clear_rewards()

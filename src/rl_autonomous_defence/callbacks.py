@@ -253,7 +253,7 @@ class SelfPlayCallback(DefaultCallbacks):
     def on_episode_end(self, worker: RolloutWorker, base_env: BaseEnv,
                        policies: Dict[str, Policy], episode: MultiAgentEpisode,
                        **kwargs):
-        unwrapped_env = base_env.get_unwrapped()[0].env.unwrapped
+        unwrapped_env = base_env.get_unwrapped()[0].unwrapped
 
         winner = self.check_winner(unwrapped_env, episode)
 
