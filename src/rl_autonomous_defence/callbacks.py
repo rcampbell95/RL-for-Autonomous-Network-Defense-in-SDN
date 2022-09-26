@@ -14,12 +14,12 @@ from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.evaluation import MultiAgentEpisode, RolloutWorker
 from ray.rllib.agents.callbacks import DefaultCallbacks
 
-from rl_autonomous_defence.utils import string_to_bool
-
 from rl_autonomous_defence.agent_config import (
     ATTACKER_CONFIG,
     DEFENDER_CONFIG
-) 
+)
+
+from rl_autonomous_defence import utils
 
 
 class SelfPlayCallback(DefaultCallbacks):
@@ -31,6 +31,11 @@ class SelfPlayCallback(DefaultCallbacks):
         self.current_opponent = 0
         self.attacker_policies = []
         self.defender_policies = []
+
+        self.elo_scores = {"attacker": 500,
+                           "attacker_v0": 500,
+                           "defender": 500,
+                           "defender_v0": 500}
 
         self.win_rate_start = float(os.getenv("RL_SDN_WINTHRESH", 0))
 
@@ -73,8 +78,9 @@ class SelfPlayCallback(DefaultCallbacks):
             new_pol_id = f"{agent}_v{self.opponents[agent]}"
             #self.last_added[agent] = result["num_env_steps_sampled"]
             print(f"adding new opponent to the mix ({new_pol_id}).")
-            self.opponent_pool_probs[agent] = self.adjust_policy_probs(agent)
+            self.elo_scores[new_pol_id] = self.elo_scores[agent]
 
+            self.opponent_pool_probs[agent] = self.adjust_policy_probs(agent)
 
             try:
                 assert len(self.opponent_pool_probs[agent]) == (self.opponents[agent] + 1)
@@ -204,11 +210,11 @@ class SelfPlayCallback(DefaultCallbacks):
             #    episode.custom_metrics[f"{loser}_win_count"] = trainable_has_won
             #    episode.hist_data[f"{loser}_win_count"].append(trainable_has_won)
 
-        if winner == "attacker":
+        if "attacker" in winner:
             return attacker_policy
-        elif winner == "defender":
+        elif "defender" in winner:
             return defender_policy
-        elif winner == "draw":
+        elif "draw" in winner:
             return "tie"
 
 
@@ -235,6 +241,12 @@ class SelfPlayCallback(DefaultCallbacks):
         episode.hist_data["attacker_win_count"] = []
         episode.hist_data["defender_win_count"] = []
 
+        attacker_policy = episode.policy_for("attacker")
+        defender_policy = episode.policy_for("defender")
+
+        episode.hist_data[f"{attacker_policy}_elo_scores"] = []
+        episode.hist_data[f"{defender_policy}_elo_scores"] = []
+
         episode.custom_metrics["recent_agents_probs"] = self.recent_agents_probs
 
         for agent in ["attacker", "defender"]:
@@ -254,7 +266,8 @@ class SelfPlayCallback(DefaultCallbacks):
 
         winner = self.check_winner(unwrapped_env, episode)
 
-        attacker_policy = episode.policy_for("attacker")
+        attacker_policy = episode.policy_for("attacker") or "attacker"
+        defender_policy = episode.policy_for("defender") or "defender"
         agent = "attacker" if attacker_policy == "attacker" else "defender"
         
         episode.custom_metrics[f"{agent}_win"] = 1 if winner == agent else 0
@@ -274,6 +287,25 @@ class SelfPlayCallback(DefaultCallbacks):
             episode.hist_data[f"episode_len_{agent}"].append(episode.custom_metrics[f"episode_len_{agent}"])
         except:
             print(episode.hist_data.keys())
+
+        if winner:
+            if attacker_policy not in self.elo_scores:
+                self.elo_scores[attacker_policy] = self.elo_scores["attacker"] 
+            if defender_policy not in self.elo_scores:
+                self.elo_scores[defender_policy] = self.elo_scores["defender"]
+            attacker_rating = utils.elo_score(self.elo_scores[attacker_policy],
+                                                self.elo_scores[defender_policy],
+                                                100,
+                                                winner in attacker_policy)
+            defender_rating = utils.elo_score(self.elo_scores[defender_policy],
+                                            self.elo_scores[attacker_policy],
+                                            100,
+                                            winner in defender_policy)
+
+        episode.custom_metrics[f"{attacker_policy}_elo_score"] = attacker_rating
+        episode.custom_metrics[f"{defender_policy}_elo_score"] = defender_rating
+        episode.hist_data[f"{attacker_policy}_elo_scores"].append(attacker_rating)
+        episode.hist_data[f"{defender_policy}_elo_scores"].append(defender_rating)
 
         stdis_current = float(os.getenv("RL_SDN_STDIS", "0.01"))
         stdes_current = float(os.getenv("RL_SDN_STDES", "0.01"))
