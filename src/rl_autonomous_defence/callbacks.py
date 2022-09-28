@@ -44,12 +44,15 @@ class SelfPlayCallback(DefaultCallbacks):
 
         self.recent_agents_probs = float(os.getenv("RL_SDN_RECENT-AGENT-PROBS", 0.8))
         self.top_k_percent = float(os.getenv("RL_SDN_TOP-K", 0.1))
-        self.pool_decay_rate = float(os.getenv("RL_SDN_OPPONENT-POOL-DECAY-RATE", 5e-4))
-        self.opponent_snapshot_freq = float(os.getenv("RL_SDN_SNAPSHOT-FREQ", 10))
 
+        steps = int(os.environ["RL_SDN_TIMESTEPS"])
+        horizon = int(os.environ["RL_SDN_HORIZON"])
+        self.pool_decay_rate = 1 / (steps // horizon)
+        self.environment_randomness = 1 / (steps // horizon)
+
+        self.opponent_snapshot_freq = float(os.getenv("RL_SDN_SNAPSHOT-FREQ", 10))
         self.rng = np.random.default_rng()
         self.opponent_pool_probs = {agent: [1] for agent in self.agents}
-        self.environment_randomness = float(os.getenv("RL_SDN_CURRICULA-SCALE", 5e-4))
 
     def _update_opponent(self, agent, trainer, result):
         try:
@@ -144,7 +147,7 @@ class SelfPlayCallback(DefaultCallbacks):
 
     def adjust_policy_probs(self, agent_id):
         agents = list(range(0, self.opponents[agent_id] + 1))
-        recent_agents_probs = max(0.1, self.recent_agents_probs - self.recent_agents_probs * self.pool_decay_rate)
+        recent_agents_probs = max(0.1, self.recent_agents_probs - self.pool_decay_rate)
         #recent_agents_probs = recent_agents_probs
         past_agents_probs = min(0.9, 1.0 - recent_agents_probs)
 
