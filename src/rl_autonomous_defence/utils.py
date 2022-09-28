@@ -1,5 +1,6 @@
 """Utilities for managing policy and environment."""
 import os
+import math
 
 import numpy as np
 from numpy.random import default_rng
@@ -225,3 +226,20 @@ def set_target_node_mask(attacker_obs: tf.Tensor, mask: tf.Tensor):
 
 
     return tf.tensor_scatter_nd_update(mask, action_possible, tf.ones(action_possible.get_shape()[0]))
+
+
+def elo_score(rating1: float, rating2: float, k: float, is_winner: bool):
+    def win_probability(rating1: float, rating2: float):
+        """Probability of agent with rating2 beating agent with rating1."""
+        return 1.0 / (1 + math.pow(10, (rating2 - rating1) / 400))
+
+    prob = win_probability(rating1, rating2)
+ 
+    # Case -1 When Player A wins
+    # Updating the Elo Ratings
+    if is_winner:
+        new_rating = min(max(0, rating1 + k * (1 - prob)), 2400)
+    else:
+        new_rating = min(max(0, rating1 + k * (0 - prob)), 2400)
+
+    return new_rating
