@@ -23,12 +23,12 @@ ModelCatalog.register_custom_model(
 ATTACKER_CONFIG = {
                     "model": {
                         "use_attention": string_to_bool(os.getenv("RL_SDN_ATTACK-ATTENTION", True)),
-                        "use_lstm": False,
                         "vf_share_layers": False,
                         "max_seq_len": 10
                         },
                     "clip_param": float(os.getenv("RL_SDN_CLIP", 0.2)),
                     "vf_loss_coeff": 0.1,
+                    "entropy_coeff": 0.1,
                     "gamma": float(os.getenv("RL_SDN_GAMMA", 0.995))
                 }
 
@@ -39,6 +39,7 @@ DEFENDER_CONFIG = {
                     },
                     "clip_param": float(os.getenv("RL_SDN_CLIP", 0.2)),
                     "vf_loss_coeff": 0.1,
+                    "entropy_coeff": 0.01,
                     #"kl_coeff": 0,
                     #"kl_target": 10,
                     "gamma": float(os.getenv("RL_SDN_GAMMA", 0.995))                    

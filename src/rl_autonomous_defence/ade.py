@@ -2,17 +2,18 @@ from typing import Callable, Dict, Tuple
 from gym.spaces import Box, Discrete
 import gym
 import numpy as np
+import os
 
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 from pettingzoo.utils import wrappers
-import os
 import random
 
 import pygame
 from pygame import gfxdraw
 
 from rl_autonomous_defence import utils
+from rl_autonomous_defence.train_config import train_config
 
 
 class AutonomousDefenceEnv(AECEnv):
@@ -37,17 +38,19 @@ class AutonomousDefenceEnv(AECEnv):
 
         These attributes should not be changed after initialization.
         """
-        self.action_out = os.getenv("RL_SDN_ACTIONSPACE", "multi").strip()
+        self.action_out = train_config["agent"]["action_space"]
 
         if self.action_out in ["autoreg", "multi"]:
             self.multi_action = True
         else:
             self.multi_action = False
         self.possible_agents = ["attacker", "defender"]
-        self.num_nodes = int(float(os.getenv("RL_SDN_NETWORKSIZE", "8").strip()))
-        self.max_num_nodes = int(os.getenv("RL_SDN_NETWORKSIZE-MAX", str(self.num_nodes)).strip())
-        self.agent_name_mapping = dict(zip(self.possible_agents,
-                                           list(range(len(self.possible_agents)))))
+        self.num_nodes = train_config["environment"]["network_size"]
+        self.max_num_nodes = train_config["environment"]["network_size_max"]
+        self.agent_name_mapping = dict(
+            zip(self.possible_agents,
+            list(range(len(self.possible_agents))))
+        )
 
         observation_space = Box(low=0,
                                 high=3,
@@ -63,7 +66,7 @@ class AutonomousDefenceEnv(AECEnv):
 
         self.observation_spaces = {agent: observation_space for agent in self.possible_agents}
 
-        self.NUM_ITERS = int(os.getenv("RL_SDN_HORIZON", "200").strip())
+        self.NUM_ITERS = int(os.environ.get("RL_SDN_HORIZON", 200))
         self.defender_action_costs = {0: 1, 1: 6, 2: 7}
         self.screen = None
         self.isopen = True
@@ -232,8 +235,11 @@ class AutonomousDefenceEnv(AECEnv):
         self._agent_selector = agent_selector(self.agents)
         self.agent_selection = self._agent_selector.next()
 
+        self.NUM_ITERS = min(self.NUM_ITERS + 1, 200)
+
+
     def reset_observations(self) -> Dict[str, np.ndarray]:
-        topology = os.getenv("RL_SDN_TOPOLOGY", "clique").strip()
+        topology = train_config["environment"]["topology"]
         topo_builder = utils.topology_builder(topology)
         defender_obs = topo_builder(self.num_nodes, self.start_positions["defender"])
         # Reset state per agent
@@ -313,15 +319,12 @@ class AutonomousDefenceEnv(AECEnv):
         """
         metrics = {"impactScore": [], "exploitabilityScore": [], "baseScore": []}
 
-        self.mean_impact_score = float(os.getenv("RL_SDN_MIS", 4.311829))
-        self.mean_exploitability_score = float(os.getenv("RL_SDN_MES", 2.592744))
-        self.std_impact_score = 0.01 #float(os.getenv("RL_SDN_STDIS", 1.539709))
-        self.std_exploitability_score = 0.01 #float(os.getenv("RL_SDN_STDES", 0.954755))
+        self.mean_impact_score = train_config["environment"]["mean_impact_score"]
+        self.mean_exploitability_score = train_config["environment"]["mean_exploitability_score"]
+        self.std_impact_score = float(os.getenv("RL_SDN_STDIS", "0.01").strip())
+        self.std_exploitability_score = float(os.getenv("RL_SDN_STDES", "0.01").strip())
 
         for _ in range(num_nodes):
-            # Baseline impact: mean = 4.311829, std = 1.539709
-            # Baseline exploitability: mean = 2.592744, std = 0.954755
-
             impact_score = np.random.normal(self.mean_impact_score, self.std_impact_score)
             exploitability_score = np.random.normal(self.mean_exploitability_score, self.std_exploitability_score)
 
@@ -347,9 +350,9 @@ class AutonomousDefenceEnv(AECEnv):
         self.global_state["networkGraph"][state_indices] += state[state_indices].astype("int32")
 
     def _validate_attacker_action(self, action: int, state: int) -> bool:
-        can_explore_topo = utils.string_to_bool(os.getenv("RL_SDN_EXPLORETOPO", "True").strip())
-        can_scan_vulns = utils.string_to_bool(os.getenv("RL_SDN_SCANVULN", "True").strip())
-        can_attack_vulns = utils.string_to_bool(os.getenv("RL_SDN_ATTACKVULN", "True").strip())
+        can_explore_topo = utils.string_to_bool(train_config["actions"]["attacker"]["explore_topo"])
+        can_scan_vulns = utils.string_to_bool(train_config["actions"]["attacker"]["scan_vuln"])
+        can_attack_vulns = utils.string_to_bool(train_config["actions"]["attacker"]["attack_vuln"])
 
         explore_topo = (action == 0) and (state == 2) and can_explore_topo
         scan_vulns = (action == 1) and (state == 0) and can_scan_vulns
@@ -358,9 +361,9 @@ class AutonomousDefenceEnv(AECEnv):
         return scan_vulns or attack_vulns or explore_topo
 
     def _validate_defender_action(self, action: int, state: int) -> bool:
-        can_check_status = utils.string_to_bool(os.getenv("RL_SDN_CHECKSTATUS", "True").strip())
-        can_isolate_node = utils.string_to_bool(os.getenv("RL_SDN_ISOLATENODE", "True").strip())
-        can_move_flag = utils.string_to_bool(os.getenv("RL_SDN_MOVEFLAG", "True").strip())
+        can_check_status = utils.string_to_bool(train_config["actions"]["defender"]["check_status"])
+        can_isolate_node = utils.string_to_bool(train_config["actions"]["defender"]["isolate_node"])
+        can_move_flag = utils.string_to_bool(train_config["actions"]["defender"]["move_flag"])
 
         check_status = (action == 0) and (state == 0) and can_check_status
         isolate_node = (action == 1) and (state == 2) and can_isolate_node
@@ -532,8 +535,7 @@ class AutonomousDefenceEnv(AECEnv):
         impact_scores = [self.global_state["vulnMetrics"]["impactScore"][node] for node in exploited_nodes]
         self.total_impact = sum(impact_scores)
         self.total_cost = sum(self.episode_costs)
-        defender_reward_func = self.reward_selector(os.getenv("RL_SDN_REWARD",
-                                                              "gabirondo").strip())
+        defender_reward_func = self.reward_selector(train_config["environment"]["reward"])
 
         rewards = defender_reward_func(self.total_impact, self.total_cost)
 
