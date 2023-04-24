@@ -24,7 +24,9 @@ if __name__ == "__main__":
 
             trial_name = "_".join([f"{key}={str(value)}" for key, value in params.items()])
             os.environ["RL_SDN_EXPERIMENT_DIRECTORY"] = f"./ray_results/{EXPERIMENT_NAME}/{trial_name}"
+            
+            config_output_file = os.path.join(os.environ["RL_SDN_EXPERIMENT_DIRECTORY"], "config.json")
+            with open(config_output_file) as fp:
+                json.dump(config, fp)
 
             subprocess.run(["python", "./src/rl_autonomous_defence/tune.py"])
-
-            
