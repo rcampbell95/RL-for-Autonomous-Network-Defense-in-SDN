@@ -11,14 +11,16 @@ config = {
     "env": "AutonomousDefenceEnv",
     "callbacks": SelfPlayCallback,
     "log_level": "DEBUG",
-    "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),
+    "num_gpus": float(os.environ.get("RLLIB_NUM_GPUS", "1")),
     "rollout_fragment_length": 250,
-    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 1000),
-    "timesteps_per_iteration": 5000,
+    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 3000),
+    "timesteps_per_iteration": 20000,
     "clip_rewards": 200,
-    "num_workers": 2,
-    "num_envs_per_worker": 5,
-    "num_cpus_for_driver": 2,
+    "num_workers": 16,
+    "num_envs_per_worker": 50,
+    "remote_worker_envs": False,
+    "num_cpus_for_driver": 4,
+    "num_gpus_per_worker": 0,
     "lr": float(os.getenv("RL_SDN_LR", 3e-4)),
     "lr_schedule": [
         [0, float(os.getenv("RL_SDN_LR", 3e-4))],
@@ -40,7 +42,8 @@ config = {
     #"evaluation_num_workers": 0,
     "tf_session_args": {
         "device_count": {
-            "CPU": 2
+            "CPU": 2,
+            "GPU": 1
         }
     },
     #"evaluation_config": {
@@ -65,8 +68,8 @@ config = {
             "policies_to_train": ["attacker", "defender"],
             "policies": {
                 "attacker": PolicySpec(config=ATTACKER_CONFIG),
-                "defender_v0": PolicySpec(policy_class=RandomPolicy), #PolicySpec(config=defender_config),
-                "attacker_v0": PolicySpec(policy_class=RandomPolicy), #PolicySpec(config=attacker_config),
+                "defender_v0": PolicySpec(policy_class=RandomPolicy),
+                "attacker_v0": PolicySpec(policy_class=RandomPolicy),
                 "defender": PolicySpec(config=DEFENDER_CONFIG),
             },
             "policy_mapping_fn": select_policy,
