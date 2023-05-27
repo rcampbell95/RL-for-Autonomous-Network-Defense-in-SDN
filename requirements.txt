@@ -1,7 +1,0 @@
-dm-tree==0.1.6
-gym==0.21.0
-jupyter==1.0.0
-PettingZoo==1.13.1
-ray==1.12.1
-tensorflow==2.5.0
-pygame
