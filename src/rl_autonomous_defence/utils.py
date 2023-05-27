@@ -1,13 +1,15 @@
 """Utilities for managing policy and environment."""
-import os
 import math
+import os
 
 import numpy as np
 from numpy.random import default_rng
 
 import tensorflow as tf
 
-NETWORK_SAMPLE_THRESHOLD = float(os.getenv("RL_SDN_STDIS", "0.01"))
+from rl_autonomous_defence.train_config import train_config
+
+NETWORK_SAMPLE_THRESHOLD = float(os.environ.get("RL_SDN_STDIS", "0.01"))
 
 
 def select_policy(agent_id, episode, worker, **kwargs):

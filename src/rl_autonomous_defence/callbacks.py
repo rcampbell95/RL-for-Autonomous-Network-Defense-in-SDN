@@ -14,6 +14,8 @@ from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.evaluation import MultiAgentEpisode, RolloutWorker
 from ray.rllib.agents.callbacks import DefaultCallbacks
 
+from rl_autonomous_defence.train_config import train_config
+
 from rl_autonomous_defence.agent_config import (
     ATTACKER_CONFIG,
     DEFENDER_CONFIG
@@ -37,20 +39,18 @@ class SelfPlayCallback(DefaultCallbacks):
                            "defender": 500,
                            "defender_v0": 500}
 
-        self.win_rate_start = float(os.getenv("RL_SDN_WINTHRESH", 0))
+        self.win_rate_start = train_config["self-play"]["win_threshold"]
 
         self.opponents = defaultdict(int) #{agent: 0 for agent in self.agents}
         self.win_rate_thresholds = {agent: self.win_rate_start for agent in self.agents}
 
-        self.recent_agents_probs = float(os.getenv("RL_SDN_RECENT-AGENT-PROBS", 0.8))
-        self.top_k_percent = float(os.getenv("RL_SDN_TOP-K", 0.1))
+        self.recent_agents_probs = train_config["self-play"]["recent_agents_probs"]
+        self.top_k_percent = train_config["self-play"]["top_k_percent"]
 
-        steps = int(os.environ["RL_SDN_TIMESTEPS"])
-        horizon = int(os.environ["RL_SDN_HORIZON"])
-        self.pool_decay_rate = 1 / (steps // horizon)
-        self.environment_randomness = 1 / (steps // horizon)
+        self.pool_decay_rate = 1 / (train_config["environment"]["timesteps"] // train_config["environment"]["horizon"])
+        self.environment_randomness = 1 / (train_config["environment"]["timesteps"] // train_config["environment"]["horizon"])
 
-        self.opponent_snapshot_freq = float(os.getenv("RL_SDN_SNAPSHOT-FREQ", 10))
+        self.opponent_snapshot_freq = train_config["self-play"]["snapshot_frequency"]
         self.rng = np.random.default_rng()
         self.opponent_pool_probs = {agent: [1] for agent in self.agents}
 
@@ -250,6 +250,8 @@ class SelfPlayCallback(DefaultCallbacks):
         episode.hist_data[f"{attacker_policy}_elo_scores"] = []
         episode.hist_data[f"{defender_policy}_elo_scores"] = []
 
+        episode.hist_data["num_compromised_nodes"] = []
+
         episode.custom_metrics["recent_agents_probs"] = self.recent_agents_probs
 
         for agent in ["attacker", "defender"]:
@@ -310,27 +312,31 @@ class SelfPlayCallback(DefaultCallbacks):
         episode.hist_data[f"{attacker_policy}_elo_scores"].append(attacker_rating)
         episode.hist_data[f"{defender_policy}_elo_scores"].append(defender_rating)
 
-        stdis_current = float(os.getenv("RL_SDN_STDIS", "0.01"))
-        stdes_current = float(os.getenv("RL_SDN_STDES", "0.01"))
+        stdis_current = float(os.getenv("RL_SDN_STDIS", "0.01").strip()) #train_config["environment"]["std_impact_score"]
+        stdes_current = float(os.getenv("RL_SDN_STDES", "0.01").strip()) #train_config["environment"]["std_exploitability_score"]
 
-        network_size_current = float(os.getenv("RL_SDN_NETWORKSIZE", "8"))
-        network_size_max = int(os.getenv("RL_SDN_NETWORKSIZE-MAX", "8"))
+        network_size_current = int(os.environ["RL_SDN_NETWORKSIZE"])
+        network_size_max = train_config["environment"]["network_size_max"] 
         
         update_network_size = min(network_size_max, network_size_current + .1)
-        os.environ["RL_SDN_NETWORKSIZE"] = str(float(update_network_size))
+        # Creates an issue where network size never changes
+        os.environ["RL_SDN_NETWORKSIZE"] = str(update_network_size)
         
         episode.custom_metrics["curr_network_size"] = int(update_network_size)
 
         os.environ["RL_SDN_STDIS"] = str(min(1, stdis_current + self.environment_randomness))
         os.environ["RL_SDN_STDES"] = str(min(1, stdes_current + self.environment_randomness))
 
-        episode.custom_metrics["impact_score_std"] = float(os.getenv("RL_SDN_STDIS", "0.01"))
-        episode.custom_metrics["exploitability_score_std"] = float(os.getenv("RL_SDN_STDES", "0.01"))
+        episode.custom_metrics["impact_score_std"] = float(os.environ["RL_SDN_STDIS"])
+        episode.custom_metrics["exploitability_score_std"] = float(os.environ["RL_SDN_STDES"])
+
+        episode.custom_metrics["num_compromised_nodes"] = unwrapped_env.num_compromised_nodes
+        episode.hist_data["num_compromised_nodes"].append(episode.custom_metrics["num_compromised_nodes"])
 
 
     def on_learn_batch(self, policy,
                        train_batch: SampleBatch, result: dict):
-        pass
+        os.environ["RL_SDN_HORIZON"] = str(min(int(os.environ["RL_SDN_HORIZON"]) + 10, 200))
         #rewards = train_batch["rewards"]
 
         #normalized_rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
