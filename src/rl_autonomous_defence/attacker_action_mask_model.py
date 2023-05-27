@@ -1,10 +1,12 @@
 from gym.spaces import Dict
 
 from ray.rllib.models.tf.fcnet import FullyConnectedNetwork
+from ray.rllib.models.tf.visionnet import VisionNetwork
 from ray.rllib.models.tf.attention_net import GTrXLNet
 from ray.rllib.models.tf.recurrent_net import RecurrentNetwork
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 from ray.rllib.utils.framework import try_import_tf
+import numpy as np
 import gym
 
 from rl_autonomous_defence.utils import (
@@ -36,7 +38,8 @@ class AttackerActionMaskModel(TFModelV2):
         super().__init__(obs_space, action_space, num_outputs, model_config, name)
 
         num_outputs = action_space[0].n + action_space[1].n
-        self.base_model = FullyConnectedNetwork(
+
+        self.base_model = VisionNetwork(
             obs_space,
             action_space,
             num_outputs,
@@ -52,7 +55,8 @@ class AttackerActionMaskModel(TFModelV2):
         #            model_config,
         #    name + "_internal",
         # 
-        logits, state = self.base_model(input_dict)
+        print(self.base_model.base_model.summary())
+        logits, self._value_out = self.base_model(input_dict)
 
         action_mask = mask_actions(input_dict["obs"])
 
@@ -75,6 +79,8 @@ class AttackerActionMaskModel(TFModelV2):
 
 
 def mask_actions(observation: tf.Tensor) -> tf.Tensor:
+    observation = tf.squeeze(observation, axis=-1)
+
     agent_target_action_mask = tf.zeros((observation.shape[0], 3))
     diagonals = tf.linalg.diag_part(observation)
     is_compromised_indices = tf.where(tf.equal(diagonals, 2))

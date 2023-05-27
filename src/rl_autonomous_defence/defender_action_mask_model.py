@@ -3,6 +3,7 @@ import os
 from gym.spaces import Dict
 
 from ray.rllib.models.tf.fcnet import FullyConnectedNetwork
+from ray.rllib.models.tf.visionnet import VisionNetwork
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 from ray.rllib.utils.framework import try_import_tf
 import gym
@@ -36,7 +37,7 @@ class DefenderActionMaskModel(TFModelV2):
 
         super().__init__(obs_space, action_space, num_outputs, model_config, name)
 
-        self.base_model = FullyConnectedNetwork(
+        self.base_model = VisionNetwork(
             obs_space,
             action_space,
             num_outputs,
@@ -80,6 +81,8 @@ class DefenderActionMaskModel(TFModelV2):
 
 
 def mask_actions(observation: tf.Tensor) -> tf.Tensor:
+    observation = tf.squeeze(observation, axis=-1)
+
     agent_target_action_mask = tf.zeros((observation.shape[0], 3))
     diagonals = tf.linalg.diag_part(observation)
     agent_target_node_mask = tf.ones((observation.shape[0], observation.shape[-1]))
