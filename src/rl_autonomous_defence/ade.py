@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Tuple, Union
 from gym.spaces import Box, Discrete
 import gym
 import numpy as np
@@ -55,7 +55,7 @@ class AutonomousDefenceEnv(AECEnv):
         observation_space = Box(low=0,
                                 high=3,
                                 shape=(self.max_num_nodes,
-                                       self.max_num_nodes, 1), dtype=np.float32)
+                                       self.max_num_nodes), dtype=np.float32)
         action_space = gym.spaces.Tuple([Discrete(self.max_num_nodes), Discrete(3)])
         #action_space =  Box(low=0, high=1, shape=(self.num_nodes + 3,))
 
@@ -173,7 +173,7 @@ class AutonomousDefenceEnv(AECEnv):
             padding = self.max_num_nodes - self.num_nodes
             observation = np.pad(observation, [(0, padding), (0, padding)])
 
-        observation = np.reshape(observation, (self.max_num_nodes, self.max_num_nodes, 1))
+        #observation = np.reshape(observation, (self.max_num_nodes, self.max_num_nodes, 1))
         return observation.astype(np.float32)
         #return {"observation": agent_observation.astype(np.float32), "action_mask": [agent_target_action_mask, agent_action_mask]}
 
@@ -389,7 +389,7 @@ class AutonomousDefenceEnv(AECEnv):
             return True
         return False
 
-    def _process_action(self, action: int) -> Tuple[int, int]:
+    def _process_action(self, action: Union[int, tuple]) -> Tuple[int, int]:
         if self.multi_action:
             target_node = action[0]
             target_action = action[1]
@@ -408,7 +408,7 @@ class AutonomousDefenceEnv(AECEnv):
         base_score = self.global_state["vulnMetrics"]["baseScore"][target_node]
 
         if target_action == 0:
-            print("Check status")
+            #print("Check status")
             success = np.random.random()
 
             true_state = self.global_state["networkGraph"][target_node][target_node]
@@ -420,14 +420,14 @@ class AutonomousDefenceEnv(AECEnv):
                     self.episode_costs.append(self.defender_action_costs[target_action])
 
         elif target_action == 1:
-            print("Isolate node")
+            #print("Isolate node")
             obs = utils.set_neighbors(obs, target_node, np.array([0] * self.num_nodes, dtype=np.int64))
 
             self.global_state["networkGraph"][target_node] = obs[target_node]
             self.global_state["networkGraph"][:, target_node] = obs[target_node]
             self.episode_costs.append(self.defender_action_costs[target_action])
         elif target_action == 2:
-            print("Migrate critical node")
+            #print("Migrate critical node")
             success = np.random.random()
 
             # check state
@@ -463,7 +463,7 @@ class AutonomousDefenceEnv(AECEnv):
         exploitability = self.global_state["vulnMetrics"]["exploitabilityScore"][target_node] / 10
 
         if target_action == 0:
-            print("Explore topology")
+            #print("Explore topology")
             obs = utils.set_neighbors(obs, target_node, self.global_state["networkGraph"][target_node])
         else:
             # Actions 1 and 2; Identify and target vulns, respectively
@@ -471,7 +471,7 @@ class AutonomousDefenceEnv(AECEnv):
             action_score = np.random.random()
             # if calculated prob < exploitability score of node
             if action_score < exploitability:
-                print("Scan or compromise node")
+                #print("Scan or compromise node")
                 # apply action to target node
                 obs[target_node][target_node] = target_action
                 # update global state
@@ -485,43 +485,33 @@ class AutonomousDefenceEnv(AECEnv):
         reward_funcs = {
             "gabirondo": self.reward_gabirondo,
             "gabirondo-scaled": self.reward_gabirondo_scaled,
-            "reward-costs-penalty": self.reward_costs_penalty,
-            "reward-costs-clipped": self.reward_costs_clipped,
-            "reward-impact-penalty": self.reward_impact_penalty,
-            "reward-binary": self.reward_binary
+            "reward-binary": self.reward_binary,
+            "reward-scaled": self.reward_scaled
         }
 
         return reward_funcs[reward_specifier]
 
-    def reward_gabirondo(self, total_impact: int, total_cost: int) -> Dict[str, int]:
+    def reward_gabirondo(self, **kwargs) -> Dict[str, int]:
         moves_made = self.NUM_ITERS - self.num_moves
+
+        total_impact = kwargs["total_impact"]
+        total_cost = kwargs["total_cost"]
 
         attacker_reward = 10 * total_impact
         defender_reward = max(1, moves_made - 10 * total_impact - total_cost)
         return {"attacker": attacker_reward, "defender": defender_reward}
 
-    def reward_gabirondo_scaled(self, total_impact: int, total_cost: int) -> Dict[str, int]:
+    def reward_gabirondo_scaled(self, **kwargs) -> Dict[str, int]:
         moves_made = self.NUM_ITERS - self.num_moves
+
+        total_impact = kwargs["total_impact"]
+        total_cost = kwargs["total_cost"]
 
         attacker_reward = 0.1 * total_impact
         defender_reward = max(1, 0.1 * (moves_made - total_impact - total_cost))
         return {"attacker": attacker_reward, "defender": defender_reward}
 
-    def reward_costs_penalty(self, total_impact: int, total_cost: int) -> Dict[str, int]:
-        defender_reward = self.mean_impact_score * self.num_nodes - total_impact - 0.1 * total_cost
-
-        return {"attacker": total_impact, "defender": defender_reward}
-
-    def reward_costs_clipped(self, total_impact: int, total_cost: int) -> Dict[str, int]:
-        defender_reward = max(0, self.mean_impact_score * self.num_nodes - total_impact - 0.5 * total_cost)
-
-        return {"attacker": total_impact, "defender": defender_reward}
-
-    def reward_impact_penalty(self, total_impact: int, total_cost: int) -> Dict[str, int]:
-        defender_reward = self.mean_impact_score * self.num_nodes - total_impact - 0 * total_cost
-        return {"attacker": total_impact, "defender": defender_reward}
-
-    def reward_binary(self, total_impact: int, total_cost: int) -> int:
+    def reward_binary(self, **kwargs) -> int:
         reward = {"attacker": 0, "defender": 0}
 
         if all(self.dones.values()) and self.winner != "draw":
@@ -529,6 +519,19 @@ class AutonomousDefenceEnv(AECEnv):
             reward[self.agents[1 - self.agent_name_mapping[self.winner]]] = 0
 
         return reward
+    
+    def reward_scaled(self, **kwargs) -> Dict[str, int]:
+        num_compromised_nodes = kwargs["num_compromised"]
+
+        percent_compromised = num_compromised_nodes / self.max_num_nodes
+        percent_episode_length = self.num_moves / self.NUM_ITERS
+
+        return {
+            "attacker": percent_compromised + percent_episode_length,
+            "defender": 1 - percent_compromised + percent_episode_length
+        }
+
+
 
     def reward(self) -> Dict[str, int]:
         reward = {agent: 0 for agent in self.agents}
@@ -540,8 +543,10 @@ class AutonomousDefenceEnv(AECEnv):
         self.total_impact = sum(impact_scores)
         self.total_cost = sum(self.episode_costs)
         defender_reward_func = self.reward_selector(train_config["environment"]["reward"])
-
-        rewards = defender_reward_func(self.total_impact, self.total_cost)
+    
+        rewards = defender_reward_func("total_impact": self.total_impact,
+                                       "total_cost": self.total_cost,
+                                       "num_compromised": len(exploited_nodes))
 
         winner_rewards = {"attacker": rewards["attacker"],
                           "defender": rewards["defender"]}

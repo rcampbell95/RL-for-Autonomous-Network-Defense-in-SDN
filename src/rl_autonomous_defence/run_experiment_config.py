@@ -7,7 +7,7 @@ import ray
 
 
 if __name__ == "__main__":
-    NUM_TRIALS = 10
+    NUM_TRIALS = 5
     EXPERIMENT_NAME = os.getenv("RL_SDN_EXPERIMENT_NAME").strip()
 
     config_path = os.getenv("RL_SDN_EXPERIMENT_CONFIG").strip()

@@ -230,6 +230,59 @@ def set_target_node_mask(attacker_obs: tf.Tensor, mask: tf.Tensor):
     return tf.tensor_scatter_nd_update(mask, action_possible, tf.ones(action_possible.get_shape()[0]))
 
 
+def mask_attacker_actions(observation: tf.Tensor) -> tf.Tensor:
+    agent_target_action_mask = tf.zeros((observation.shape[0], 3))
+    diagonals = tf.linalg.diag_part(observation)
+    is_compromised_indices = tf.where(tf.equal(diagonals, 2))
+
+    agent_target_node_mask = tf.zeros((observation.shape[0], observation.shape[-1]))
+
+    agent_target_node_mask = set_target_node_mask(observation, agent_target_node_mask)
+
+    # explore topology
+    agent_target_node_mask = tf.tensor_scatter_nd_update(agent_target_node_mask, is_compromised_indices, tf.ones(is_compromised_indices.get_shape()[0]))
+    agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 2, 0)
+
+    # scan vuln
+    agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 0, 1)
+    # compromise vuln
+    agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 1, 2)
+    return tf.keras.layers.concatenate([agent_target_node_mask, agent_target_action_mask])
+
+
+
+def mask_defender_actions(observation: tf.Tensor) -> tf.Tensor:
+    agent_target_action_mask = tf.zeros((observation.shape[0], 3))
+    diagonals = tf.linalg.diag_part(observation)
+    agent_target_node_mask = tf.ones((observation.shape[0], observation.shape[-1]))
+
+    is_critical_indices = tf.where(tf.equal(diagonals, 3))
+
+    agent_target_node_mask = tf.tensor_scatter_nd_update(agent_target_node_mask, is_critical_indices, tf.zeros(is_critical_indices.get_shape()[0]))
+
+    current_size = int(float(os.environ["RL_SDN_NETWORKSIZE"]))
+    max_size = int(os.environ.get("RL_SDN_NETWORKSIZE-MAX", str(current_size)))
+    assert isinstance(current_size, int)
+    assert isinstance(max_size, int)
+
+    if max_size > current_size:
+        indices = [[[j, i] for i in range(current_size, max_size)] for j in range(agent_target_node_mask.shape[0])]
+        updates = [[0 for i in range(len(indices[0]))] for j in range(agent_target_node_mask.shape[0])]
+
+        indices = tf.constant(indices, dtype=tf.int32)
+        updates = tf.constant(updates, dtype=tf.float32)
+
+        agent_target_node_mask = tf.tensor_scatter_nd_update(agent_target_node_mask, indices, updates)
+
+    # migrate node
+    agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 0, 2)
+    # check status
+    agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 0, 0)
+    # isolate node
+    agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 2, 1)
+    return tf.keras.layers.concatenate([agent_target_node_mask, agent_target_action_mask])
+
+
 def elo_score(rating1: float, rating2: float, k: float, is_winner: bool):
     def win_probability(rating1: float, rating2: float):
         """Probability of agent with rating2 beating agent with rating1."""
