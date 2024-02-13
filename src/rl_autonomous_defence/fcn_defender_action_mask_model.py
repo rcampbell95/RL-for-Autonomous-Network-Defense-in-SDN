@@ -9,6 +9,8 @@ from ray.rllib.utils.framework import try_import_tf
 import gym
 import numpy as np
 
+import timeit
+
 from rl_autonomous_defence.utils import (
     mask_defender_actions
 )
@@ -35,6 +37,7 @@ class FCNDefenderActionMaskModel(TFModelV2):
             isinstance(obs_space, gym.spaces.Box)
         )
 
+
         super().__init__(obs_space, action_space, num_outputs, model_config, name)
 
         self.base_model = FullyConnectedNetwork(
@@ -50,10 +53,12 @@ class FCNDefenderActionMaskModel(TFModelV2):
 
     def forward(self, input_dict, state, seq_lens):
         # Compute the unmasked logits.
-        print(self.base_model.summary())
-
+        start = timeit.default_timer()
         logits, state = self.base_model(input_dict)
+        elapsed = timeit.default_timer() - start
+        print(f"Model call time (Defender FCN): {elapsed}")
 
+        start = timeit.default_timer()
         if self.model_config["custom_model_config"]["masked_actions"]:
             action_mask = mask_defender_actions(input_dict["obs"])
 
@@ -61,6 +66,9 @@ class FCNDefenderActionMaskModel(TFModelV2):
             inf_mask = tf.maximum(tf.math.log(action_mask,), -1e4)
             inf_mask = tf.reshape(inf_mask, logits.shape)
             logits = logits + inf_mask
+
+        elapsed = timeit.default_timer() - start
+        print(f"Time to mask actions (Defender FCN): {elapsed}")
 
         # Return masked logits.
         return logits, state

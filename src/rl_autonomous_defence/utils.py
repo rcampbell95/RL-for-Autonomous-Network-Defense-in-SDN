@@ -213,55 +213,91 @@ def mask_target_action(node_states: tf.Tensor, target_action_mask: tf.Tensor, st
     return target_action_mask
 
 
-def set_target_node_mask(attacker_obs: tf.Tensor, mask: tf.Tensor):
-    bool_mask = tf.math.reduce_any(tf.equal(attacker_obs, 2), axis=1)
-    masked_rows = tf.boolean_mask(attacker_obs, bool_mask)
-    action_possible = tf.where(tf.equal(attacker_obs, 1))
-
-    action_batch_shape = (action_possible.get_shape()[0], 1)
-    action_batch_index = tf.reshape(action_possible[:, 0],
-                                    action_batch_shape)
-    action_possible_index = tf.reshape(action_possible[:, 2],
-                                    action_batch_shape)
-
-    action_possible = tf.keras.layers.concatenate([action_batch_index, action_possible_index], axis=1)
 
 
-    return tf.tensor_scatter_nd_update(mask, action_possible, tf.ones(action_possible.get_shape()[0]))
+def set_target_node_mask(attacker_obs: tf.Tensor, features: tf.Tensor=None):
+    if features is not None:
+        assert attacker_obs.shape[0] == features.shape[0]
+        assert attacker_obs.shape[-1] == features.shape[1]
+        obs = tf.linalg.set_diag(attacker_obs, features)
+    else:
+        obs = attacker_obs
+    bool_mask = tf.cast(tf.math.reduce_any(tf.equal(obs, 2), axis=1), tf.float32)
+    rows = tf.math.multiply(obs, tf.expand_dims(bool_mask, -1))
+
+    summed_rows = tf.reduce_sum(rows, axis=1)
+
+    assert summed_rows.shape[1] == attacker_obs.shape[-1]
+
+    if 0 in summed_rows.shape:
+        return tf.zeros([attacker_obs.shape[0], attacker_obs.shape[-1]])
+    elif summed_rows.shape[0] == attacker_obs.shape[0]:
+        return tf.cast(tf.cast(tf.not_equal(summed_rows, 0), tf.int32), tf.float32)
+    try:
+        assert summed_rows.shape[0] == attacker_obs.shape[0]
+        print(f"Mismatch in obs shape and masked rows. Obs shape {attacker_obs.shape} Masked rows shape: {masked_rows.shape}")
+    except AssertionError:
+        raise Exception(f"Mismatch in obs shape and masked rows. Obs shape {attacker_obs.shape} Masked rows shape: {masked_rows.shape} Observation: {attacker_obs}")
+
+    #action_possible = tf.where(tf.equal(attacker_obs, 1))
+
+    #action_batch_shape = (action_possible.get_shape()[0], 1)
+    #action_batch_index = tf.reshape(action_possible[:, 0],
+    #                                action_batch_shape)
+    #action_possible_index = tf.reshape(action_possible[:, 2],
+    #                                action_batch_shape)
+
+    #action_possible = tf.keras.layers.concatenate([action_batch_index, action_possible_index], axis=1)
 
 
-def mask_attacker_actions(observation: tf.Tensor) -> tf.Tensor:
+    #return tf.tensor_scatter_nd_update(mask, action_possible, tf.ones(action_possible.get_shape()[0]))
+
+
+def mask_attacker_actions(observation: tf.Tensor, features: tf.Tensor=None) -> tf.Tensor:
     agent_target_action_mask = tf.zeros((observation.shape[0], 3))
-    diagonals = tf.linalg.diag_part(observation)
-    is_compromised_indices = tf.where(tf.equal(diagonals, 2))
+    if features is not None:
+        diagonals = features
+    else:
+        diagonals = tf.linalg.diag_part(observation)
 
-    agent_target_node_mask = tf.zeros((observation.shape[0], observation.shape[-1]))
-
-    agent_target_node_mask = set_target_node_mask(observation, agent_target_node_mask)
+    agent_target_node_mask = set_target_node_mask(observation, features)
 
     # explore topology
-    agent_target_node_mask = tf.tensor_scatter_nd_update(agent_target_node_mask, is_compromised_indices, tf.ones(is_compromised_indices.get_shape()[0]))
     agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 2, 0)
 
     # scan vuln
     agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 0, 1)
     # compromise vuln
     agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 1, 2)
-    return tf.keras.layers.concatenate([agent_target_node_mask, agent_target_action_mask])
 
+    if train_config["agent"]["action_space"] == "multi":
+        action_mask = tf.keras.layers.concatenate([agent_target_node_mask, agent_target_action_mask])
+    elif train_config["agent"]["action_space"] == "product":
+        num_actions = 3
 
+        assert agent_target_node_mask.shape[1] == observation.shape[-1]
+        tiled_action_mask = tf.tile(agent_target_node_mask, [1, num_actions])
+        assert tiled_action_mask.shape[0] == observation.shape[0]
+        assert tiled_action_mask.shape[-1] == observation.shape[-1] * num_actions
+        action_mask = tf.reshape(tiled_action_mask, [observation.shape[0], num_actions, observation.shape[-1]])
+        action_mask = tf.math.multiply(action_mask, tf.expand_dims(agent_target_action_mask, axis=-1))
+        action_mask = tf.reshape(action_mask,  [observation.shape[0], -1])
+    return action_mask
 
-def mask_defender_actions(observation: tf.Tensor) -> tf.Tensor:
+def mask_defender_actions(observation: tf.Tensor, features: tf.Tensor=None) -> tf.Tensor:
     agent_target_action_mask = tf.zeros((observation.shape[0], 3))
-    diagonals = tf.linalg.diag_part(observation)
+    if features is not None:
+        diagonals = features
+    else:
+        diagonals = tf.linalg.diag_part(observation)
     agent_target_node_mask = tf.ones((observation.shape[0], observation.shape[-1]))
 
     is_critical_indices = tf.where(tf.equal(diagonals, 3))
 
     agent_target_node_mask = tf.tensor_scatter_nd_update(agent_target_node_mask, is_critical_indices, tf.zeros(is_critical_indices.get_shape()[0]))
 
-    current_size = int(float(os.environ["RL_SDN_NETWORKSIZE"]))
-    max_size = int(os.environ.get("RL_SDN_NETWORKSIZE-MAX", str(current_size)))
+    current_size = train_config["environment"]["network_size"] #int(float(os.environ["RL_SDN_NETWORKSIZE"]))
+    max_size = train_config["environment"]["network_size_max"] #int(os.environ.get("RL_SDN_NETWORKSIZE-MAX", str(current_size)))
     assert isinstance(current_size, int)
     assert isinstance(max_size, int)
 
@@ -280,7 +316,15 @@ def mask_defender_actions(observation: tf.Tensor) -> tf.Tensor:
     agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 0, 0)
     # isolate node
     agent_target_action_mask = mask_target_action(diagonals, agent_target_action_mask, 2, 1)
-    return tf.keras.layers.concatenate([agent_target_node_mask, agent_target_action_mask])
+
+    if train_config["agent"]["action_space"] == "multi":
+        action_mask = tf.keras.layers.concatenate([agent_target_node_mask, agent_target_action_mask])
+    elif train_config["agent"]["action_space"] == "product":
+        num_actions = 3
+        action_mask = tf.reshape(tf.tile(agent_target_node_mask, [1, num_actions]), [observation.shape[0], num_actions, observation.shape[-1]])
+        action_mask = tf.math.multiply(action_mask, tf.expand_dims(agent_target_action_mask, axis=-1))
+        action_mask = tf.reshape(action_mask,  [observation.shape[0], -1])
+    return action_mask
 
 
 def elo_score(rating1: float, rating2: float, k: float, is_winner: bool):
@@ -298,3 +342,21 @@ def elo_score(rating1: float, rating2: float, k: float, is_winner: bool):
         new_rating = min(max(0, rating1 + k * (0 - prob)), 2400)
 
     return new_rating
+
+
+def normalize_batch(obs_batch: tf.Tensor) -> tf.Tensor:
+    adj_batch_tensor = obs_batch
+    epsilon = 1e-6
+
+    node_degrees = tf.reduce_sum(adj_batch_tensor, axis=-2) + epsilon
+    pow_tensor = tf.ones(node_degrees.shape) * -0.5
+
+    pow_tensor = tf.math.pow(node_degrees, pow_tensor)
+    zeros_tensor = tf.zeros(adj_batch_tensor.shape, dtype=tf.float32)
+    normal_diag = tf.linalg.set_diag(zeros_tensor, pow_tensor)
+
+    num_dims = [i for i in range(len(adj_batch_tensor.shape))]
+    permute_dims = num_dims[:-2] + [num_dims[-1], num_dims[-2]]
+
+    normalized_adjacency = tf.transpose(tf.matmul(adj_batch_tensor, normal_diag), perm=permute_dims)
+    return tf.matmul(normalized_adjacency, normal_diag)

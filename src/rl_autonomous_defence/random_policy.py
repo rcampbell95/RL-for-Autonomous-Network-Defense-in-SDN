@@ -1,11 +1,12 @@
 import random
 
 import numpy as np
-from gym.spaces import Box
+import gym
 
 from ray.rllib.policy.policy import Policy
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.typing import ModelWeights
+from ray.rllib.policy.view_requirement import ViewRequirement
 
 
 class RandomPolicy(Policy):
@@ -18,9 +19,9 @@ class RandomPolicy(Policy):
         # should be ignored (default: False). This is to test action-clipping
         # and any Env's reaction to bounds breaches.
         if self.config.get("ignore_action_bounds", False) and isinstance(
-            self.action_space, Box
+            self.action_space, gym.spaces.Box
         ):
-            self.action_space_for_sampling = Box(
+            self.action_space_for_sampling = gym.spaces.Box(
                 -float("inf"),
                 float("inf"),
                 shape=self.action_space.shape,
@@ -28,6 +29,7 @@ class RandomPolicy(Policy):
             )
         else:
             self.action_space_for_sampling = self.action_space
+        
 
     @override(Policy)
     def compute_actions(
@@ -41,12 +43,16 @@ class RandomPolicy(Policy):
 
         # Alternatively, a numpy array would work here as well.
         # e.g.: np.array([random.choice([0, 1])] * len(obs_batch))
-        unbatched = [self.action_space_for_sampling.sample() for _ in obs_batch]
-        #unbatched = [self.action_space_for_sampling.sample() for _ in obs_batch]
-        actions = tuple(
-            np.array([unbatched[j][i] for j in range(len(unbatched))]) for i in range(len(unbatched[0]))
-        )
-        return actions, [], {}
+        if isinstance(self.action_space_for_sampling, gym.spaces.MultiDiscrete):
+            unbatched = [self.action_space_for_sampling.sample() for _ in obs_batch]
+
+            actions = tuple(
+                [0, 0] for i in range(obs_batch.shape[0])
+            )
+        elif isinstance(self.action_space_for_sampling, gym.spaces.Discrete):
+            unbatched = [0 for _ in obs_batch]
+            actions = unbatched
+        return np.array(actions), [], {}
 
     @override(Policy)
     def learn_on_batch(self, samples):

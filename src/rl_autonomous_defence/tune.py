@@ -9,15 +9,23 @@ import ray
 from ray import tune
 
 from rl_autonomous_defence import ade
+from rl_autonomous_defence import toy_env
 from rl_autonomous_defence import policy_config
 from rl_autonomous_defence.CheckpointWrapper import CheckpointWrapperPPO
 from rl_autonomous_defence.train_config import train_config
 
 
 if __name__ == "__main__":
-    ray.init(log_to_driver=False, num_cpus=20)
+    ray.init(log_to_driver=True, num_cpus=18)
 
+    register_env('toy-env', lambda x: PettingZooEnv(toy_env.env()))
     register_env('AutonomousDefenceEnv', lambda x: PettingZooEnv(ade.env()))
+
+    policy_config.config["env"] = "AutonomousDefenceEnv" 
+    # train_config["environment"]["env_name"]
+
+    #if policy_config.config["env"] == "toy-env":
+    #    del policy_config.config["callbacks"]
 
     stop = {
         "timesteps_total": train_config["environment"]["timesteps"]

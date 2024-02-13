@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rl_autonomous_defence"
+dynamic = [
+	"version",
+	"description",
+	"readme",
+	"requires-python",
+	"authors"
+]
+
+[tool.setuptools.dynamic]
+version = {file = ["version.txt"]}

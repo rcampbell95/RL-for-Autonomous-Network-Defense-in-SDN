@@ -14,6 +14,8 @@ from rl_autonomous_defence.autoregressive_model import AutoregressiveActionModel
 from rl_autonomous_defence import ade
 from rl_autonomous_defence.utils import string_to_bool
 
+from rl_autonomous_defence.train_config import train_config
+
 
 ModelCatalog.register_custom_model(
     "fcn_attacker_action_mask_model",
@@ -40,42 +42,50 @@ ATTACKER_CONFIG = {
                     "model": {
                         "use_attention": string_to_bool(os.getenv("RL_SDN_ATTACK-ATTENTION", False)),
                         "vf_share_layers": False,
-                        "conv_filters": [[4, 3, 2], [8, 3, 2], [11, 2, 2]],
-                        "conv_activation": os.getenv("RL_SDN_CNN-ACTIVATION", "relu"),
-                        "post_fcnet_hiddens": [256, 256],
-                        "post_fcnet_activation": os.getenv("RL_SDN_FCNET-ACTIVATION", "relu"),
+                        #"conv_filters": [[4, 3, 2], [8, 3, 2], [11, 2, 2]],
+                        #"conv_activation": os.getenv("RL_SDN_CNN-ACTIVATION", "relu"),
+                        #"post_fcnet_hiddens": [256, 256],
+                        #"post_fcnet_activation": os.getenv("RL_SDN_FCNET-ACTIVATION", "relu"),
                         "custom_model_config": {
-                            "masked_actions": os.getenv("RL_SDN_MASKEDACTIONS", False)
+                            "masked_actions": train_config["agent"]["masked_actions"],
+                            "action_space_spec": train_config["agent"]["action_space"],
+                            "gcn_hiddens": [64, 64],
+                            "dense_hiddens": 128
                         }
                     },
-                    "clip_param": float(os.getenv("RL_SDN_CLIP", 0.2)),
-                    "vf_loss_coeff": 0.1,
-                    "entropy_coeff": 0.1,
-                    "gamma": float(os.getenv("RL_SDN_GAMMA", 0.995)),
+                    "num_iter_sgd": 10, 
+                    #"clip_param": float(os.getenv("RL_SDN_CLIP", 0.2)),
+                    "vf_loss_coeff": float(os.getenv("RL_SDN_VF-COEFF", 1)),
+                    "entropy_coeff": float(os.getenv("RL_SDN_ENTROPY-COEFF", 0.1)),
+                    "kl_coeff": float(os.getenv("RL_SDN_KL-COEFF", 1)),
+                    "gamma": float(os.getenv("RL_SDN_GAMMA", 0.99)),
                 }
 
 DEFENDER_CONFIG = {
                     "model": {
                         "use_attention":  string_to_bool(os.getenv("RL_SDN_DEFEND-ATTENTION", False)),
                         "vf_share_layers": False,
-                        "conv_filters": [[4, 2, 2], [8, 2, 2], [11, 2, 2]],
-                        "conv_activation": os.getenv("RL_SDN_CNN-ACTIVATION", "relu"),
-                        "post_fcnet_hiddens": [256, 256],
-                        "post_fcnet_activation": os.getenv("RL_SDN_FCNET-ACTIVATION", "relu"),
+                        #"conv_filters": [[4, 2, 2], [8, 2, 2], [11, 2, 2]],
+                        #"conv_activation": os.getenv("RL_SDN_CNN-ACTIVATION", "relu"),
+                        #"post_fcnet_hiddens": [256, 256],
+                        #"post_fcnet_activation": os.getenv("RL_SDN_FCNET-ACTIVATION", "relu"),
                         "custom_model_config": {
-                            "masked_actions": os.getenv("RL_SDN_MASKEDACTIONS", False)
+                            "masked_actions": train_config["agent"]["masked_actions"],
+                            "action_space_spec": train_config["agent"]["action_space"],
+                            "gcn_hiddens": [32],
+                            "dense_hiddens": 64
                         }
                     },
-                    "clip_param": float(os.getenv("RL_SDN_CLIP", 0.2)),
-                    "vf_loss_coeff": 0.1,
-                    "entropy_coeff": 0.1,
-                    #"kl_coeff": 0,
-                    #"kl_target": 10,
-                    "gamma": float(os.getenv("RL_SDN_GAMMA", 0.995))
+                    "num_iter_sgd": 10,
+                    #"clip_param": float(os.getenv("RL_SDN_CLIP", 0.2)),
+                    "vf_loss_coeff": float(os.getenv("RL_SDN_VF-COEFF", 1)),
+                    "entropy_coeff": float(os.getenv("RL_SDN_ENTROPY-COEFF", 0.1)),
+                    "kl_coeff": float(os.getenv("RL_SDN_KL-COEFF", 1)),
+                    "gamma": float(os.getenv("RL_SDN_GAMMA", 0.99))
                 }
 
-if string_to_bool(os.getenv("RL_SDN_MASKEDACTIONS", False)):
-    model_backbone = os.getenv("RL_SDN_MODEL-BACKBONE", "fcn").lower()
+if train_config["agent"]["masked_actions"]:
+    model_backbone = os.getenv("RL_SDN_BACKBONE-MODEL", "gcn").lower()
 
     assert model_backbone in ["fcn", "gcn"]
 

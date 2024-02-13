@@ -5,46 +5,33 @@ from random_policy import RandomPolicy
 
 from rl_autonomous_defence.utils import select_policy, string_to_bool
 from rl_autonomous_defence.agent_config import ATTACKER_CONFIG, DEFENDER_CONFIG
-
+from rl_autonomous_defence.train_config import train_config
 
 config = {
     "env": "AutonomousDefenceEnv",
     "callbacks": SelfPlayCallback,
     "log_level": "DEBUG",
-    "num_gpus": float(os.environ.get("RLLIB_NUM_GPUS", "1")),
+    "num_gpus": train_config["train"]["num_gpus"],
     "rollout_fragment_length": 200,
-    "train_batch_size": os.getenv("RL_SDN_BATCHSIZE", 5000),
+    "train_batch_size": train_config["train"]["train_batch_size"],#os.getenv("RL_SDN_BATCHSIZE", 1000),
     "timesteps_per_iteration": 10000,
-    "sgd_minibatch_size": 50,
+    "sgd_minibatch_size": 512,
     "clip_rewards": 200,
-    "num_workers": 16,
-    "num_envs_per_worker": 50,
-    "horizon": int(os.environ.get("RL_SDN_HORIZON", 200)),
+    "num_workers": 10,
+    "num_envs_per_worker": 1,
+    "horizon": train_config["train"]["horizon"],
     "remote_worker_envs": False,
-    "num_cpus_for_driver": 4,
+    "num_cpus_for_driver": 1,
     "num_gpus_per_worker": 0,
-    "lr": float(os.getenv("RL_SDN_LR", 3e-4)),
+    "lr": train_config["train"]["lr"],
     "lr_schedule": [
-        [0, float(os.getenv("RL_SDN_LR", 3e-4))],
-        [int(os.getenv("RL_SDN_TIMESTEPS", "45000").strip()), 1e-5]
+        [0, train_config["train"]["lr"]],
+        [train_config["environment"]["timesteps"], 1e-5]
     ],
-    #"min_train_timesteps_per_reporting": 5000,
-    #"batch_mode": "complete_episodes",
-    "framework": "tfe",
-    # Evaluate once per training iteration.
-    #"evaluation_interval": 0,
-    # Run evaluation on (at least) two episodes
-    #"evaluation_duration": 100,
-    #"evaluation_duration_unit": "episodes",
-    #"evaluation_parallel_to_training": True,
-    # ... using one evaluation worker (setting this to 0 will cause
-    # evaluation to run on the local evaluation worker, blocking
-    # training until evaluation is done).
-    #"always_attach_evaluation_results": True,
-    #"evaluation_num_workers": 0,
+    "framework": "tf2",
     "tf_session_args": {
         "device_count": {
-            "CPU": 2,
+            "CPU": 1,
             "GPU": 1
         }
     },
@@ -70,8 +57,8 @@ config = {
             "policies_to_train": ["attacker", "defender"],
             "policies": {
                 "attacker": PolicySpec(config=ATTACKER_CONFIG),
-                "defender_v0": PolicySpec(policy_class=RandomPolicy),
-                "attacker_v0": PolicySpec(policy_class=RandomPolicy),
+                "defender_v0": PolicySpec(policy_class=DEFENDER_CONFIG),
+                "attacker_v0": PolicySpec(policy_class=ATTACKER_CONFIG),
                 "defender": PolicySpec(config=DEFENDER_CONFIG),
             },
             "policy_mapping_fn": select_policy,

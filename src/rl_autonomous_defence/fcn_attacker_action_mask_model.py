@@ -6,6 +6,8 @@ from ray.rllib.models.tf.fcnet import FullyConnectedNetwork
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 from ray.rllib.utils.framework import try_import_tf
 
+import timeit
+
 import gym
 
 from rl_autonomous_defence.utils import (
@@ -44,8 +46,8 @@ class FCNAttackerActionMaskModel(TFModelV2):
         )
 
     def forward(self, input_dict, state, seq_lens):
-        print(self.base_model.summary())
-
+        # Compute the unmasked logits.
+        start = timeit.default_timer()
         logits, state = self.base_model(input_dict)
 
         if self.model_config["custom_model_config"]["masked_actions"]:
